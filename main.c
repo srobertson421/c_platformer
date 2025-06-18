@@ -591,10 +591,70 @@ int main(int argc, char* argv[]) {
                            (event.type == SDL_KEYDOWN) || 
                            (event.type == SDL_KEYUP) || 
                            (event.type == SDL_QUIT) ||
-                           (event.type == SDL_MOUSEBUTTONDOWN);
+                           (event.type == SDL_MOUSEBUTTONDOWN) ||
+                           (event.type == SDL_MOUSEMOTION); // Always log mouse motion for debugging
             
             if (shouldLog) {
                 LOG_DEBUG("Event %d: Type=%s (%d)", eventCount, eventTypeName, event.type);
+                
+                // Add detailed logging for mouse motion events to detect misclassified keyboard events
+                if (event.type == SDL_MOUSEMOTION) {
+                    LOG_DEBUG("MOUSEMOTION: x=%d y=%d xrel=%d yrel=%d state=0x%08X", 
+                             event.motion.x, event.motion.y, event.motion.xrel, event.motion.yrel, event.motion.state);
+                    
+                    // Check for suspicious mouse motion that might be misclassified keyboard input
+                    // Keyboard events misclassified as mouse motion often have unusual patterns
+                    if (event.motion.xrel == 0 && event.motion.yrel == 0 && event.motion.state == 0) {
+                        LOG_WARNING("Suspicious MOUSEMOTION event (no movement, no buttons) - possible misclassified keyboard input");
+                    }
+                    
+                    // Try to detect keyboard scan codes in mouse motion data (Windows SDL bug workaround)
+                    if (event.motion.x > 0 && event.motion.x < 512) {
+                        int scancode = event.motion.x;
+                        LOG_WARNING("Possible keyboard scancode %d detected in MOUSEMOTION x coordinate", scancode);
+                        
+                        // Try to convert suspicious mouse motion to keyboard input
+                        // SDL scancodes: A=4, D=7, W=26, SPACE=44, LEFT=80, RIGHT=79, UP=82
+                        // Key releases might have different patterns (e.g., in y coordinate or different values)
+                        bool isKeyPress = (event.motion.y == 0); // Assume press if y=0, release if y!=0
+                        
+                        switch (scancode) {
+                            case 4:   // A key (SDL_SCANCODE_A)
+                            case 80:  // LEFT arrow (SDL_SCANCODE_LEFT)
+                                leftPressed = isKeyPress;
+                                LOG_INFO("Recovered LEFT key %s from misclassified MOUSEMOTION", 
+                                        isKeyPress ? "press" : "release");
+                                break;
+                            case 7:   // D key (SDL_SCANCODE_D)
+                            case 79:  // RIGHT arrow (SDL_SCANCODE_RIGHT)
+                                rightPressed = isKeyPress;
+                                LOG_INFO("Recovered RIGHT key %s from misclassified MOUSEMOTION", 
+                                        isKeyPress ? "press" : "release");
+                                break;
+                            case 26:  // W key (SDL_SCANCODE_W)
+                            case 82:  // UP arrow (SDL_SCANCODE_UP)
+                            case 44:  // SPACE (SDL_SCANCODE_SPACE)
+                                jumpPressed = isKeyPress;
+                                LOG_INFO("Recovered JUMP key %s from misclassified MOUSEMOTION", 
+                                        isKeyPress ? "press" : "release");
+                                break;
+                            default:
+                                LOG_DEBUG("Unknown scancode %d in MOUSEMOTION - not mapped to game input", scancode);
+                                break;
+                        }
+                    }
+                    
+                    // Alternative pattern: check if scancodes appear in different fields
+                    if (event.motion.y > 0 && event.motion.y < 512 && event.motion.x == 0) {
+                        LOG_WARNING("Possible keyboard scancode %d detected in MOUSEMOTION y coordinate", event.motion.y);
+                    }
+                    
+                    // Check for unusual relative motion that might indicate misclassified keys
+                    if (abs(event.motion.xrel) > 100 || abs(event.motion.yrel) > 100) {
+                        LOG_WARNING("Large relative motion detected: xrel=%d yrel=%d - possible misclassified input", 
+                                   event.motion.xrel, event.motion.yrel);
+                    }
+                }
             }
             
             if (eventCount > 100) {
