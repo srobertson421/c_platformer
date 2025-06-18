@@ -554,8 +554,8 @@ int main(int argc, char* argv[]) {
             LOG_DEBUG("Frame %d: Starting SDL_PollEvent loop...", frameCount);
         }
         
-        // Check keyboard state directly (Windows debugging) - more frequent for troubleshooting
-        if (frameCount % 30 == 0) { // Every 0.5 seconds for better responsiveness
+        // Check keyboard state directly (Windows debugging) - very frequent for responsiveness
+        if (frameCount % 5 == 0) { // Every ~0.08 seconds (5 frames) for immediate response
             const Uint8* keystate = SDL_GetKeyboardState(NULL);
             LOG_INFO("Direct keyboard state check - A:%d D:%d W:%d SPACE:%d LEFT:%d RIGHT:%d UP:%d", 
                      keystate[SDL_SCANCODE_A], keystate[SDL_SCANCODE_D], keystate[SDL_SCANCODE_W], 
