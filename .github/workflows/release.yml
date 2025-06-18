@@ -120,14 +120,14 @@ jobs:
           cp /mingw64/bin/libchipmunk.dll platformer-windows/ || true
           cp /mingw64/bin/libpng*.dll platformer-windows/ || true
           cp /mingw64/bin/zlib*.dll platformer-windows/ || true
-          # Create zip archive
-          7z a -tzip platformer-windows-x64.zip platformer-windows
+          # Create zip archive using tar (available in MSYS2)
+          tar -czf platformer-windows-x64.tar.gz platformer-windows
           
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: platformer-windows-x64
-          path: platformer-windows-x64.zip
+          path: platformer-windows-x64.tar.gz
 
   create-release:
     needs: [build-linux, build-macos, build-windows]
@@ -187,4 +187,4 @@ jobs:
           files: |
             artifacts/platformer-linux-x64/platformer-linux-x64.tar.gz
             artifacts/platformer-macos-x64/platformer-macos-x64.tar.gz
-            artifacts/platformer-windows-x64/platformer-windows-x64.zip
+            artifacts/platformer-windows-x64/platformer-windows-x64.tar.gz
