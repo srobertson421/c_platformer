@@ -497,6 +497,19 @@ int main(int argc, char* argv[]) {
     Sprite playerSprite = createCharacterSprite(renderer);
     LOG_INFO("Player sprite loaded successfully");
 
+    // Check initial window state
+    Uint32 windowFlags = SDL_GetWindowFlags(window);
+    LOG_INFO("Window flags: 0x%08X", windowFlags);
+    if (windowFlags & SDL_WINDOW_INPUT_FOCUS) {
+        LOG_INFO("Window has input focus");
+    } else {
+        LOG_WARNING("Window does NOT have input focus");
+    }
+    
+    // Enable text input for debugging
+    SDL_StartTextInput();
+    LOG_INFO("Text input enabled");
+    
     // Main loop
     bool running = true;
     SDL_Event event;
@@ -532,8 +545,41 @@ int main(int argc, char* argv[]) {
         if (frameCount <= 3) {
             LOG_DEBUG("Frame %d: Starting SDL_PollEvent loop...", frameCount);
         }
+        
+        // Log keyboard state every 60 frames (once per second)
+        if (frameCount % 60 == 0) {
+            LOG_INFO("Frame %d: Current input state - left:%d right:%d jump:%d", 
+                     frameCount, leftPressed, rightPressed, jumpPressed);
+        }
+        
         while (SDL_PollEvent(&event)) {
             eventCount++;
+            
+            // Log ALL events for debugging (not just first 3 frames)
+            const char* eventTypeName = "UNKNOWN";
+            switch (event.type) {
+                case SDL_QUIT: eventTypeName = "QUIT"; break;
+                case SDL_KEYDOWN: eventTypeName = "KEYDOWN"; break;
+                case SDL_KEYUP: eventTypeName = "KEYUP"; break;
+                case SDL_MOUSEBUTTONDOWN: eventTypeName = "MOUSEBUTTONDOWN"; break;
+                case SDL_MOUSEBUTTONUP: eventTypeName = "MOUSEBUTTONUP"; break;
+                case SDL_MOUSEMOTION: eventTypeName = "MOUSEMOTION"; break;
+                case SDL_WINDOWEVENT: eventTypeName = "WINDOWEVENT"; break;
+                case SDL_TEXTINPUT: eventTypeName = "TEXTINPUT"; break;
+                default: break;
+            }
+            
+            // Log every event for first 10 seconds, then only important ones
+            bool shouldLog = (frameCount <= 600) || 
+                           (event.type == SDL_KEYDOWN) || 
+                           (event.type == SDL_KEYUP) || 
+                           (event.type == SDL_QUIT) ||
+                           (event.type == SDL_MOUSEBUTTONDOWN);
+            
+            if (shouldLog) {
+                LOG_DEBUG("Event %d: Type=%s (%d)", eventCount, eventTypeName, event.type);
+            }
+            
             if (eventCount > 100) {
                 LOG_WARNING("Too many events in one frame: %d", eventCount);
                 break; // Prevent infinite loop
@@ -543,60 +589,98 @@ int main(int argc, char* argv[]) {
                 LOG_INFO("Quit event received");
                 running = false;
             } else if (event.type == SDL_MOUSEBUTTONDOWN) {
-                LOG_DEBUG("Mouse button down at (%d, %d)", event.button.x, event.button.y);
+                LOG_INFO("Mouse button %d down at (%d, %d)", event.button.button, event.button.x, event.button.y);
                 if (event.button.button == SDL_BUTTON_LEFT && boxCount < MAX_BOXES) {
                     cpVect mousePos = sdlToCP(event.button.x, event.button.y);
                     boxes[boxCount] = createBox(space, mousePos);
                     boxCount++;
                 }
             } else if (event.type == SDL_KEYDOWN) {
-                LOG_DEBUG("Key down: %d (scancode: %d)", event.key.keysym.sym, event.key.keysym.scancode);
+                LOG_INFO("KEYDOWN: sym=%d scancode=%d mod=%d repeat=%d", 
+                        event.key.keysym.sym, event.key.keysym.scancode, 
+                        event.key.keysym.mod, event.key.repeat);
+                        
+                // Check if key is actually one we care about
+                bool isMovementKey = (event.key.keysym.sym == SDLK_a || event.key.keysym.sym == SDLK_LEFT ||
+                                    event.key.keysym.sym == SDLK_d || event.key.keysym.sym == SDLK_RIGHT ||
+                                    event.key.keysym.sym == SDLK_w || event.key.keysym.sym == SDLK_UP ||
+                                    event.key.keysym.sym == SDLK_SPACE || event.key.keysym.sym == SDLK_F1);
+                                    
+                if (!isMovementKey) {
+                    LOG_WARNING("Unhandled key down: %d", event.key.keysym.sym);
+                }
+                
                 switch (event.key.keysym.sym) {
                     case SDLK_F1:
                         showDebug = !showDebug;
-                        LOG_INFO("Debug visualization: %s", showDebug ? "ON" : "OFF");
+                        LOG_INFO("F1 pressed - Debug visualization: %s", showDebug ? "ON" : "OFF");
                         printf("Debug visualization: %s\n", showDebug ? "ON" : "OFF");
                         break;
                     case SDLK_a:
                     case SDLK_LEFT:
                         leftPressed = true;
-                        LOG_DEBUG("Left pressed");
+                        LOG_INFO("LEFT movement key pressed (was: %s)", leftPressed ? "already pressed" : "false");
                         break;
                     case SDLK_d:
                     case SDLK_RIGHT:
                         rightPressed = true;
-                        LOG_DEBUG("Right pressed");
+                        LOG_INFO("RIGHT movement key pressed (was: %s)", rightPressed ? "already pressed" : "false");
                         break;
                     case SDLK_w:
                     case SDLK_UP:
                     case SDLK_SPACE:
                         jumpPressed = true;
-                        LOG_DEBUG("Jump pressed");
+                        LOG_INFO("JUMP key pressed (was: %s)", jumpPressed ? "already pressed" : "false");
+                        break;
+                    default:
+                        // Already logged as unhandled above
                         break;
                 }
             } else if (event.type == SDL_KEYUP) {
-                LOG_DEBUG("Key up: %d", event.key.keysym.sym);
+                LOG_INFO("KEYUP: sym=%d scancode=%d mod=%d", 
+                        event.key.keysym.sym, event.key.keysym.scancode, event.key.keysym.mod);
+                        
                 switch (event.key.keysym.sym) {
                     case SDLK_a:
                     case SDLK_LEFT:
                         leftPressed = false;
-                        LOG_DEBUG("Left released");
+                        LOG_INFO("LEFT movement key released");
                         break;
                     case SDLK_d:
                     case SDLK_RIGHT:
                         rightPressed = false;
+                        LOG_INFO("RIGHT movement key released");
                         break;
                     case SDLK_w:
                     case SDLK_UP:
                     case SDLK_SPACE:
                         jumpPressed = false;
+                        LOG_INFO("JUMP key released");
+                        break;
+                    default:
+                        LOG_DEBUG("Unhandled key up: %d", event.key.keysym.sym);
                         break;
                 }
+            } else if (event.type == SDL_WINDOWEVENT) {
+                LOG_DEBUG("WINDOWEVENT: event=%d", event.window.event);
+                if (event.window.event == SDL_WINDOWEVENT_FOCUS_LOST) {
+                    LOG_WARNING("Window lost focus!");
+                } else if (event.window.event == SDL_WINDOWEVENT_FOCUS_GAINED) {
+                    LOG_INFO("Window gained focus");
+                }
+            } else if (shouldLog) {
+                LOG_DEBUG("Other event type: %d", event.type);
             }
         }
         
-        if (frameCount <= 3) {
+        // Log event summary
+        if (frameCount <= 3 || eventCount > 0) {
             LOG_DEBUG("Frame %d: Event handling complete, processed %d events", frameCount, eventCount);
+        }
+        
+        // Check if no events are being received
+        if (frameCount % 300 == 0 && eventCount == 0) {
+            LOG_WARNING("Frame %d: No events received for 5 seconds - possible input issue", frameCount);
         }
 
         // Update player movement
