@@ -6,7 +6,10 @@
 #include <stdbool.h>
 #include <stdlib.h>
 #include <math.h>
-#include "logging.h"
+#include <signal.h>
+#include <execinfo.h>
+#include <unistd.h>
+#include <time.h>
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
@@ -40,6 +43,72 @@ typedef struct {
     cpShape *shape;
     ShapeType type;
 } DebugShape;
+
+// Crash handler function
+void crash_handler(int sig) {
+    void *array[10];
+    size_t size;
+    char **strings;
+    size_t i;
+    FILE *crash_file = NULL;
+    time_t now;
+    char time_str[64];
+    
+    // Get current time for timestamp
+    time(&now);
+    strftime(time_str, sizeof(time_str), "%Y-%m-%d %H:%M:%S", localtime(&now));
+    
+    // Try to open crash log file
+    crash_file = fopen("crash.log", "a");
+    
+    // Write to stderr (for console if available)
+    fprintf(stderr, "\n=== CRASH DETECTED ===\n");
+    fprintf(stderr, "Time: %s\n", time_str);
+    fprintf(stderr, "Signal: %d\n", sig);
+    
+    // Write to file if we could open it
+    if (crash_file) {
+        fprintf(crash_file, "\n=== CRASH DETECTED ===\n");
+        fprintf(crash_file, "Time: %s\n", time_str);
+        fprintf(crash_file, "Signal: %d\n", sig);
+    }
+    
+    // Get stack trace
+    size = backtrace(array, 10);
+    strings = backtrace_symbols(array, size);
+    
+    fprintf(stderr, "Stack trace (%zd frames):\n", size);
+    if (crash_file) {
+        fprintf(crash_file, "Stack trace (%zd frames):\n", size);
+    }
+    
+    for (i = 0; i < size; i++) {
+        fprintf(stderr, "  %s\n", strings[i]);
+        if (crash_file) {
+            fprintf(crash_file, "  %s\n", strings[i]);
+        }
+    }
+    
+    free(strings);
+    
+    fprintf(stderr, "=== END CRASH INFO ===\n");
+    if (crash_file) {
+        fprintf(crash_file, "=== END CRASH INFO ===\n\n");
+        fclose(crash_file);
+    }
+    
+    // Re-raise the signal to get core dump
+    signal(sig, SIG_DFL);
+    raise(sig);
+}
+
+// Setup crash handlers
+void setup_crash_handlers() {
+    signal(SIGSEGV, crash_handler);  // Segmentation fault
+    signal(SIGABRT, crash_handler);  // Abort
+    signal(SIGFPE, crash_handler);   // Floating point exception
+    signal(SIGILL, crash_handler);   // Illegal instruction
+}
 
 // Sprite frame structure
 typedef struct {
@@ -88,36 +157,29 @@ cpVect sdlToCP(int x, int y) {
 
 // Load character spritesheet from file
 SDL_Texture* loadCharacterSpritesheet(SDL_Renderer *renderer) {
-    LOG_DEBUG("Attempting to load character spritesheet from ./assets/characters.png");
     SDL_Texture *texture = IMG_LoadTexture(renderer, "./assets/characters.png");
     if (!texture) {
-        LOG_ERROR("Failed to load character spritesheet: %s", IMG_GetError());
-        printf("Failed to load character spritesheet: %s\n", IMG_GetError());
+        fprintf(stderr, "Failed to load character spritesheet: %s\n", IMG_GetError());
         return NULL;
     }
-    LOG_DEBUG("Character spritesheet loaded successfully");
     return texture;
 }
 
 // Initialize sprite with character spritesheet
 Sprite createCharacterSprite(SDL_Renderer *renderer) {
-    LOG_DEBUG("Creating character sprite...");
     Sprite sprite = {0};
     
     // Load character spritesheet
     sprite.texture = loadCharacterSpritesheet(renderer);
     if (!sprite.texture) {
-        LOG_ERROR("Failed to create character sprite - texture loading failed");
-        printf("Failed to create character sprite\n");
         return sprite;
     }
     
     // Allocate animations
-    LOG_DEBUG("Allocating memory for %d animations", ANIM_COUNT);
     sprite.animationCount = ANIM_COUNT;
     sprite.animations = malloc(sizeof(Animation) * ANIM_COUNT);
     if (!sprite.animations) {
-        LOG_ERROR("Failed to allocate memory for animations");
+        fprintf(stderr, "Failed to allocate memory for animations\n");
         SDL_DestroyTexture(sprite.texture);
         sprite.texture = NULL;
         return sprite;
@@ -148,14 +210,12 @@ Sprite createCharacterSprite(SDL_Renderer *renderer) {
     sprite.animations[ANIM_JUMP].loop = false;
     
     // Start with idle animation, facing right
-    LOG_DEBUG("Setting up initial sprite state");
     sprite.currentAnimation = ANIM_IDLE;
     sprite.currentFrame = 0;
     sprite.animationTimer = 0.0f;
     sprite.isPlaying = true;
     sprite.facingLeft = false;
     
-    LOG_DEBUG("Character sprite created successfully");
     return sprite;
 }
 
@@ -195,24 +255,16 @@ void setSpriteAnimation(Sprite *sprite, int animation) {
 
 // Render sprite at given position with optional horizontal flipping
 void renderSprite(SDL_Renderer *renderer, Sprite *sprite, int x, int y) {
-    LOG_DEBUG("renderSprite called at (%d, %d)", x, y);
-    
     if (!sprite->texture || sprite->animationCount == 0) {
-        LOG_WARNING("renderSprite: Invalid sprite data (texture=%p, animCount=%d)", 
-                   (void*)sprite->texture, sprite->animationCount);
         return;
     }
     
     Animation *anim = &sprite->animations[sprite->currentAnimation];
     if (sprite->currentFrame >= anim->frameCount) {
-        LOG_WARNING("renderSprite: Invalid frame index %d >= %d", 
-                   sprite->currentFrame, anim->frameCount);
         return;
     }
     
     SpriteFrame *frame = &anim->frames[sprite->currentFrame];
-    LOG_DEBUG("renderSprite: Using frame %d, src rect (%d,%d,%d,%d)", 
-             sprite->currentFrame, frame->x, frame->y, frame->width, frame->height);
     
     SDL_Rect srcRect = {
         frame->x, frame->y,
@@ -227,17 +279,9 @@ void renderSprite(SDL_Renderer *renderer, Sprite *sprite, int x, int y) {
         spriteSize, spriteSize               // Double scale (100x100)
     };
     
-    LOG_DEBUG("renderSprite: Dest rect (%d,%d,%d,%d)", 
-             dstRect.x, dstRect.y, dstRect.w, dstRect.h);
-    
     // Use SDL_RenderCopyEx for flipping support
     SDL_RendererFlip flip = sprite->facingLeft ? SDL_FLIP_HORIZONTAL : SDL_FLIP_NONE;
-    LOG_DEBUG("renderSprite: Calling SDL_RenderCopyEx...");
-    if (SDL_RenderCopyEx(renderer, sprite->texture, &srcRect, &dstRect, 0.0, NULL, flip) != 0) {
-        LOG_ERROR("SDL_RenderCopyEx failed: %s", SDL_GetError());
-    } else {
-        LOG_DEBUG("renderSprite: SDL_RenderCopyEx completed successfully");
-    }
+    SDL_RenderCopyEx(renderer, sprite->texture, &srcRect, &dstRect, 0.0, NULL, flip);
 }
 
 // Cleanup sprite resources
@@ -385,39 +429,27 @@ void drawDebugShape(SDL_Renderer *renderer, cpShape *shape, ShapeType type) {
 }
 
 int main(int argc, char* argv[]) {
-    // Suppress unused parameter warnings
     (void)argc;
     (void)argv;
     
-    // Initialize logging
-    log_init("platformer.log");
-    LOG_INFO("Starting platformer game");
-    LOG_INFO("Command line args: %d", argc);
+    // Setup crash handlers
+    setup_crash_handlers();
     
     // Initialize SDL
-    LOG_INFO("Initializing SDL...");
     if (SDL_Init(SDL_INIT_VIDEO) < 0) {
-        LOG_ERROR("SDL initialization failed: %s", SDL_GetError());
-        printf("SDL initialization failed: %s\n", SDL_GetError());
-        log_close();
+        fprintf(stderr, "SDL initialization failed: %s\n", SDL_GetError());
         return 1;
     }
-    LOG_INFO("SDL initialized successfully");
     
     // Initialize SDL_image
-    LOG_INFO("Initializing SDL_image...");
     int imgFlags = IMG_INIT_PNG | IMG_INIT_JPG;
     if (!(IMG_Init(imgFlags) & imgFlags)) {
-        LOG_ERROR("SDL_image initialization failed: %s", IMG_GetError());
-        printf("SDL_image initialization failed: %s\n", IMG_GetError());
+        fprintf(stderr, "SDL_image initialization failed: %s\n", IMG_GetError());
         SDL_Quit();
-        log_close();
         return 1;
     }
-    LOG_INFO("SDL_image initialized successfully");
 
     // Create window
-    LOG_INFO("Creating SDL window (%dx%d)...", WINDOW_WIDTH, WINDOW_HEIGHT);
     SDL_Window *window = SDL_CreateWindow(
         "Chipmunk2D Box Collision Demo",
         SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED,
@@ -426,43 +458,32 @@ int main(int argc, char* argv[]) {
     );
     
     if (!window) {
-        LOG_ERROR("Window creation failed: %s", SDL_GetError());
-        printf("Window creation failed: %s\n", SDL_GetError());
+        fprintf(stderr, "Window creation failed: %s\n", SDL_GetError());
         SDL_Quit();
-        log_close();
         return 1;
     }
-    LOG_INFO("SDL window created successfully");
 
     // Create renderer
-    LOG_INFO("Creating SDL renderer...");
     SDL_Renderer *renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED);
     if (!renderer) {
-        LOG_ERROR("Renderer creation failed: %s", SDL_GetError());
-        printf("Renderer creation failed: %s\n", SDL_GetError());
+        fprintf(stderr, "Renderer creation failed: %s\n", SDL_GetError());
         SDL_DestroyWindow(window);
         SDL_Quit();
-        log_close();
         return 1;
     }
-    LOG_INFO("SDL renderer created successfully");
 
     // Create Chipmunk space
-    LOG_INFO("Creating Chipmunk physics space...");
     cpSpace *space = cpSpaceNew();
     if (!space) {
-        LOG_ERROR("Failed to create Chipmunk space");
+        fprintf(stderr, "Failed to create Chipmunk space\n");
         SDL_DestroyRenderer(renderer);
         SDL_DestroyWindow(window);
         SDL_Quit();
-        log_close();
         return 1;
     }
-    cpSpaceSetGravity(space, cpv(0, -980)); // Gravity pointing down
-    LOG_INFO("Chipmunk physics space created successfully");
+    cpSpaceSetGravity(space, cpv(0, -980));
 
     // Create static ground body
-    LOG_INFO("Creating ground physics body...");
     cpBody *groundBody = cpSpaceGetStaticBody(space);
     cpShape *ground = cpSegmentShapeNew(groundBody, 
         cpv(0, GROUND_HEIGHT), 
@@ -470,7 +491,6 @@ int main(int argc, char* argv[]) {
         0.0f);
     cpShapeSetFriction(ground, 0.3f);
     cpSpaceAddShape(space, ground);
-    LOG_INFO("Ground physics body created successfully");
 
     // Initialize box array
     Box boxes[MAX_BOXES];
@@ -485,53 +505,32 @@ int main(int argc, char* argv[]) {
     bool jumpPressed = false;
     
     // Create initial box (player)
-    LOG_INFO("Creating player physics body...");
     boxes[boxCount] = createBox(space, cpv(WINDOW_WIDTH / 2, WINDOW_HEIGHT - 50));
-    cpBody *playerBody = boxes[0].body; // Keep reference to player body
-    cpShape *playerShape = boxes[0].shape; // Keep reference to player shape
+    cpBody *playerBody = boxes[0].body;
+    cpShape *playerShape = boxes[0].shape;
     boxCount++;
-    LOG_INFO("Player physics body created successfully");
     
     // Create player sprite
-    LOG_INFO("Loading player sprite...");
     Sprite playerSprite = createCharacterSprite(renderer);
-    LOG_INFO("Player sprite loaded successfully");
-
-    // Check initial window state
-    Uint32 windowFlags = SDL_GetWindowFlags(window);
-    LOG_INFO("Window flags: 0x%08X", windowFlags);
-    if (windowFlags & SDL_WINDOW_INPUT_FOCUS) {
-        LOG_INFO("Window has input focus");
-    } else {
-        LOG_WARNING("Window does NOT have input focus");
+    if (!playerSprite.texture) {
+        fprintf(stderr, "Failed to load player sprite\n");
+        // Continue without sprite
     }
-    
-    // Try to ensure window focus on Windows
+
+    // Setup input
     SDL_RaiseWindow(window);
     SDL_SetWindowInputFocus(window);
-    
-    // Enable text input for debugging
     SDL_StartTextInput();
-    LOG_INFO("Text input enabled");
-    
-    // Pump events to ensure everything is initialized
     SDL_PumpEvents();
-    LOG_INFO("Initial event pump completed");
     
     // Main loop
     bool running = true;
     SDL_Event event;
     Uint32 lastTime = SDL_GetTicks();
     int frameCount = 0;
-    LOG_INFO("Entering main game loop");
     
     while (running) {
         frameCount++;
-        
-        // Log first few frames for debugging
-        if (frameCount <= 3) {
-            LOG_DEBUG("Frame %d starting...", frameCount);
-        }
         
         Uint32 currentTime = SDL_GetTicks();
         cpFloat dt = (currentTime - lastTime) / 1000.0f;
@@ -539,368 +538,122 @@ int main(int argc, char* argv[]) {
         // Handle first frame case where dt would be 0
         if (dt <= 0.0f) {
             dt = 0.016f; // Default to 60 FPS
-            LOG_DEBUG("First frame or invalid dt, using default: %f", dt);
         }
         
         lastTime = currentTime;
-        
-        if (frameCount <= 3) {
-            LOG_DEBUG("Frame %d: dt=%f, starting event handling...", frameCount, dt);
-        }
 
-        // Handle events
-        int eventCount = 0;
-        if (frameCount <= 3) {
-            LOG_DEBUG("Frame %d: Starting SDL_PollEvent loop...", frameCount);
-        }
-        
-        // Check keyboard state directly (Windows debugging) - very frequent for responsiveness
-        if (frameCount % 5 == 0) { // Every ~0.08 seconds (5 frames) for immediate response
+        // Check keyboard state directly - frequent polling for responsive input
+        if (frameCount % 5 == 0) { // Every ~0.08 seconds (5 frames)
             const Uint8* keystate = SDL_GetKeyboardState(NULL);
-            LOG_INFO("Direct keyboard state check - A:%d D:%d W:%d SPACE:%d LEFT:%d RIGHT:%d UP:%d", 
-                     keystate[SDL_SCANCODE_A], keystate[SDL_SCANCODE_D], keystate[SDL_SCANCODE_W], 
-                     keystate[SDL_SCANCODE_SPACE], keystate[SDL_SCANCODE_LEFT], keystate[SDL_SCANCODE_RIGHT], 
-                     keystate[SDL_SCANCODE_UP]);
             
-            // If any keys are pressed, use direct input (bypass SDL events completely)
-            if (keystate[SDL_SCANCODE_A] || keystate[SDL_SCANCODE_LEFT]) {
-                leftPressed = true;
-                LOG_INFO("Direct input: LEFT key detected via keyboard state polling");
-            } else if (leftPressed) {
-                leftPressed = false;
-                LOG_INFO("Direct input: LEFT key released via keyboard state polling");
-            }
-            
-            if (keystate[SDL_SCANCODE_D] || keystate[SDL_SCANCODE_RIGHT]) {
-                rightPressed = true;
-                LOG_INFO("Direct input: RIGHT key detected via keyboard state polling");
-            } else if (rightPressed) {
-                rightPressed = false;
-                LOG_INFO("Direct input: RIGHT key released via keyboard state polling");
-            }
-            
-            if (keystate[SDL_SCANCODE_W] || keystate[SDL_SCANCODE_UP] || keystate[SDL_SCANCODE_SPACE]) {
-                jumpPressed = true;
-                LOG_INFO("Direct input: JUMP key detected via keyboard state polling");
-            } else if (jumpPressed) {
-                jumpPressed = false;
-                LOG_INFO("Direct input: JUMP key released via keyboard state polling");
-            }
+            // Update input state based on direct keyboard polling
+            leftPressed = (keystate[SDL_SCANCODE_A] || keystate[SDL_SCANCODE_LEFT]) ? true : false;
+            rightPressed = (keystate[SDL_SCANCODE_D] || keystate[SDL_SCANCODE_RIGHT]) ? true : false;
+            jumpPressed = (keystate[SDL_SCANCODE_W] || keystate[SDL_SCANCODE_UP] || keystate[SDL_SCANCODE_SPACE]) ? true : false;
         }
         
-        // Log keyboard state every 60 frames (once per second)
-        if (frameCount % 60 == 0) {
-            LOG_INFO("Frame %d: Current input state - left:%d right:%d jump:%d", 
-                     frameCount, leftPressed, rightPressed, jumpPressed);
-        }
-        
+        // Handle events
         while (SDL_PollEvent(&event)) {
-            eventCount++;
-            
-            // Log ALL events for debugging (not just first 3 frames)
-            const char* eventTypeName = "UNKNOWN";
-            switch (event.type) {
-                case SDL_QUIT: eventTypeName = "QUIT"; break;
-                case SDL_KEYDOWN: eventTypeName = "KEYDOWN"; break;
-                case SDL_KEYUP: eventTypeName = "KEYUP"; break;
-                case SDL_MOUSEBUTTONDOWN: eventTypeName = "MOUSEBUTTONDOWN"; break;
-                case SDL_MOUSEBUTTONUP: eventTypeName = "MOUSEBUTTONUP"; break;
-                case SDL_MOUSEMOTION: eventTypeName = "MOUSEMOTION"; break;
-                case SDL_WINDOWEVENT: eventTypeName = "WINDOWEVENT"; break;
-                case SDL_TEXTINPUT: eventTypeName = "TEXTINPUT"; break;
-                default: break;
-            }
-            
-            // Log every event for first 10 seconds, then only important ones
-            bool shouldLog = (frameCount <= 600) || 
-                           (event.type == SDL_KEYDOWN) || 
-                           (event.type == SDL_KEYUP) || 
-                           (event.type == SDL_QUIT) ||
-                           (event.type == SDL_MOUSEBUTTONDOWN) ||
-                           (event.type == SDL_MOUSEMOTION); // Always log mouse motion for debugging
-            
-            if (shouldLog) {
-                LOG_DEBUG("Event %d: Type=%s (%d)", eventCount, eventTypeName, event.type);
-                
-                // Add detailed logging for mouse motion events to detect misclassified keyboard events
-                if (event.type == SDL_MOUSEMOTION) {
-                    LOG_DEBUG("MOUSEMOTION: x=%d y=%d xrel=%d yrel=%d state=0x%08X", 
-                             event.motion.x, event.motion.y, event.motion.xrel, event.motion.yrel, event.motion.state);
-                    
-                    // Check for suspicious mouse motion that might be misclassified keyboard input
-                    // Keyboard events misclassified as mouse motion often have unusual patterns
-                    if (event.motion.xrel == 0 && event.motion.yrel == 0 && event.motion.state == 0) {
-                        LOG_WARNING("Suspicious MOUSEMOTION event (no movement, no buttons) - possible misclassified keyboard input");
-                    }
-                    
-                    // SDL scancodes are typically 0-255, so anything >255 is likely not a scancode
-                    // Let's look for patterns that might indicate misclassified keyboard input
-                    if (event.motion.x >= 0 && event.motion.x <= 255 && event.motion.y == 0) {
-                        int scancode = event.motion.x;
-                        LOG_WARNING("Possible keyboard scancode %d detected in MOUSEMOTION x coordinate", scancode);
-                        
-                        // Try to convert suspicious mouse motion to keyboard input
-                        // SDL scancodes: A=4, D=7, W=26, SPACE=44, LEFT=80, RIGHT=79, UP=82
-                        bool isKeyPress = true; // Assume key press for now
-                        
-                        switch (scancode) {
-                            case 4:   // A key (SDL_SCANCODE_A)
-                            case 80:  // LEFT arrow (SDL_SCANCODE_LEFT)
-                                leftPressed = isKeyPress;
-                                LOG_INFO("Recovered LEFT key %s from misclassified MOUSEMOTION", 
-                                        isKeyPress ? "press" : "release");
-                                break;
-                            case 7:   // D key (SDL_SCANCODE_D)
-                            case 79:  // RIGHT arrow (SDL_SCANCODE_RIGHT)
-                                rightPressed = isKeyPress;
-                                LOG_INFO("Recovered RIGHT key %s from misclassified MOUSEMOTION", 
-                                        isKeyPress ? "press" : "release");
-                                break;
-                            case 26:  // W key (SDL_SCANCODE_W)
-                            case 82:  // UP arrow (SDL_SCANCODE_UP)
-                            case 44:  // SPACE (SDL_SCANCODE_SPACE)
-                                jumpPressed = isKeyPress;
-                                LOG_INFO("Recovered JUMP key %s from misclassified MOUSEMOTION", 
-                                        isKeyPress ? "press" : "release");
-                                break;
-                            default:
-                                if (scancode <= 255) {
-                                    LOG_DEBUG("Valid SDL scancode %d in MOUSEMOTION but not mapped to game input", scancode);
-                                } else {
-                                    LOG_DEBUG("Invalid scancode %d in MOUSEMOTION - outside valid range", scancode);
-                                }
-                                break;
-                        }
-                    } else if (event.motion.x > 255) {
-                        LOG_DEBUG("Large x coordinate %d in MOUSEMOTION - likely actual mouse movement", event.motion.x);
-                    }
-                    
-                    // Alternative pattern: check if scancodes appear in different fields
-                    if (event.motion.y > 0 && event.motion.y < 512 && event.motion.x == 0) {
-                        LOG_WARNING("Possible keyboard scancode %d detected in MOUSEMOTION y coordinate", event.motion.y);
-                    }
-                    
-                    // Check for unusual relative motion that might indicate misclassified keys
-                    if (abs(event.motion.xrel) > 100 || abs(event.motion.yrel) > 100) {
-                        LOG_WARNING("Large relative motion detected: xrel=%d yrel=%d - possible misclassified input", 
-                                   event.motion.xrel, event.motion.yrel);
-                    }
-                }
-            }
-            
-            if (eventCount > 100) {
-                LOG_WARNING("Too many events in one frame: %d", eventCount);
-                break; // Prevent infinite loop
-            }
-            
             if (event.type == SDL_QUIT) {
-                LOG_INFO("Quit event received");
                 running = false;
             } else if (event.type == SDL_MOUSEBUTTONDOWN) {
-                LOG_INFO("Mouse button %d down at (%d, %d)", event.button.button, event.button.x, event.button.y);
                 if (event.button.button == SDL_BUTTON_LEFT && boxCount < MAX_BOXES) {
-                    // Add bounds checking for mouse position
                     if (event.button.x >= 0 && event.button.x < WINDOW_WIDTH && 
                         event.button.y >= 0 && event.button.y < WINDOW_HEIGHT) {
                         cpVect mousePos = sdlToCP(event.button.x, event.button.y);
-                        LOG_DEBUG("Creating box at mouse position: SDL(%d,%d) -> Chipmunk(%.2f,%.2f)", 
-                                 event.button.x, event.button.y, mousePos.x, mousePos.y);
                         boxes[boxCount] = createBox(space, mousePos);
                         boxCount++;
-                        LOG_DEBUG("Box created successfully. Total boxes: %d", boxCount);
-                    } else {
-                        LOG_WARNING("Mouse click outside window bounds: (%d,%d)", event.button.x, event.button.y);
                     }
                 }
             } else if (event.type == SDL_KEYDOWN) {
-                LOG_INFO("KEYDOWN: sym=%d scancode=%d mod=%d repeat=%d", 
-                        event.key.keysym.sym, event.key.keysym.scancode, 
-                        event.key.keysym.mod, event.key.repeat);
-                        
-                // Check if key is actually one we care about
-                bool isMovementKey = (event.key.keysym.sym == SDLK_a || event.key.keysym.sym == SDLK_LEFT ||
-                                    event.key.keysym.sym == SDLK_d || event.key.keysym.sym == SDLK_RIGHT ||
-                                    event.key.keysym.sym == SDLK_w || event.key.keysym.sym == SDLK_UP ||
-                                    event.key.keysym.sym == SDLK_SPACE || event.key.keysym.sym == SDLK_F1);
-                                    
-                if (!isMovementKey) {
-                    LOG_WARNING("Unhandled key down: %d", event.key.keysym.sym);
-                }
-                
                 switch (event.key.keysym.sym) {
                     case SDLK_F1:
                         showDebug = !showDebug;
-                        LOG_INFO("F1 pressed - Debug visualization: %s", showDebug ? "ON" : "OFF");
                         printf("Debug visualization: %s\n", showDebug ? "ON" : "OFF");
                         break;
                     case SDLK_a:
                     case SDLK_LEFT:
                         leftPressed = true;
-                        LOG_INFO("LEFT movement key pressed (was: %s)", leftPressed ? "already pressed" : "false");
                         break;
                     case SDLK_d:
                     case SDLK_RIGHT:
                         rightPressed = true;
-                        LOG_INFO("RIGHT movement key pressed (was: %s)", rightPressed ? "already pressed" : "false");
                         break;
                     case SDLK_w:
                     case SDLK_UP:
                     case SDLK_SPACE:
                         jumpPressed = true;
-                        LOG_INFO("JUMP key pressed (was: %s)", jumpPressed ? "already pressed" : "false");
-                        break;
-                    default:
-                        // Already logged as unhandled above
                         break;
                 }
             } else if (event.type == SDL_KEYUP) {
-                LOG_INFO("KEYUP: sym=%d scancode=%d mod=%d", 
-                        event.key.keysym.sym, event.key.keysym.scancode, event.key.keysym.mod);
-                        
                 switch (event.key.keysym.sym) {
                     case SDLK_a:
                     case SDLK_LEFT:
                         leftPressed = false;
-                        LOG_INFO("LEFT movement key released");
                         break;
                     case SDLK_d:
                     case SDLK_RIGHT:
                         rightPressed = false;
-                        LOG_INFO("RIGHT movement key released");
                         break;
                     case SDLK_w:
                     case SDLK_UP:
                     case SDLK_SPACE:
                         jumpPressed = false;
-                        LOG_INFO("JUMP key released");
-                        break;
-                    default:
-                        LOG_DEBUG("Unhandled key up: %d", event.key.keysym.sym);
                         break;
                 }
-            } else if (event.type == SDL_WINDOWEVENT) {
-                LOG_DEBUG("WINDOWEVENT: event=%d", event.window.event);
-                if (event.window.event == SDL_WINDOWEVENT_FOCUS_LOST) {
-                    LOG_WARNING("Window lost focus!");
-                } else if (event.window.event == SDL_WINDOWEVENT_FOCUS_GAINED) {
-                    LOG_INFO("Window gained focus");
-                }
-            } else if (shouldLog) {
-                LOG_DEBUG("Other event type: %d", event.type);
             }
         }
         
-        // Log event summary
-        if (frameCount <= 3 || eventCount > 0) {
-            LOG_DEBUG("Frame %d: Event handling complete, processed %d events", frameCount, eventCount);
-        }
-        
-        // Check if no events are being received
-        if (frameCount % 300 == 0 && eventCount == 0) {
-            LOG_WARNING("Frame %d: No events received for 5 seconds - possible input issue", frameCount);
-        }
-
         // Update player movement
-        if (frameCount <= 3) {
-            LOG_DEBUG("Frame %d: Starting player movement update...", frameCount);
-        }
-        if (frameCount % 60 == 0) {
-            LOG_DEBUG("Frame %d: Input state - left:%d right:%d jump:%d", 
-                     frameCount, leftPressed, rightPressed, jumpPressed);
-        }
-        
-        // Removed old fallback keyboard polling - now using more frequent direct polling above
-        
         updatePlayerMovement(space, playerBody, playerShape, leftPressed, rightPressed, jumpPressed);
         
-        if (frameCount <= 3) {
-            LOG_DEBUG("Frame %d: Starting sprite animation update...", frameCount);
-        }
-        
         // Update player sprite animation based on movement state
-        cpVect vel = cpBodyGetVelocity(playerBody);
-        bool onGround = isOnGround(space, playerBody, playerShape);
-        
-        // Update sprite direction based on velocity
-        if (vel.x < -5.0f) {
-            playerSprite.facingLeft = true;
-        } else if (vel.x > 5.0f) {
-            playerSprite.facingLeft = false;
-        }
-        // Don't change direction if velocity is too small (preserve last direction)
-        
-        // Update animation based on state
-        if (!onGround) {
-            setSpriteAnimation(&playerSprite, ANIM_JUMP);
-        } else if (fabs(vel.x) > 10.0f) {
-            setSpriteAnimation(&playerSprite, ANIM_WALK);
-        } else {
-            setSpriteAnimation(&playerSprite, ANIM_IDLE);
-        }
-        
-        // Update sprite animation timer
-        updateSprite(&playerSprite, dt);
-        
-        if (frameCount <= 3) {
-            LOG_DEBUG("Frame %d: Starting physics update...", frameCount);
+        if (playerSprite.texture) {
+            cpVect vel = cpBodyGetVelocity(playerBody);
+            bool onGround = isOnGround(space, playerBody, playerShape);
+            
+            // Update sprite direction based on velocity
+            if (vel.x < -5.0f) {
+                playerSprite.facingLeft = true;
+            } else if (vel.x > 5.0f) {
+                playerSprite.facingLeft = false;
+            }
+            
+            // Update animation based on state
+            if (!onGround) {
+                setSpriteAnimation(&playerSprite, ANIM_JUMP);
+            } else if (fabs(vel.x) > 10.0f) {
+                setSpriteAnimation(&playerSprite, ANIM_WALK);
+            } else {
+                setSpriteAnimation(&playerSprite, ANIM_IDLE);
+            }
+            
+            // Update sprite animation timer
+            updateSprite(&playerSprite, dt);
         }
         
         // Update physics
-        // Additional safety check - this shouldn't happen now but keep as backup
         if (dt > 0.033f) {
-            LOG_WARNING("Large dt detected: %f, clamping to 0.033", dt);
-            dt = 0.033f;
-        }
-        
-        // Log physics step occasionally for debugging
-        if (frameCount % 300 == 0) {
-            LOG_DEBUG("Physics step with dt: %f", dt);
+            dt = 0.033f; // Clamp to reasonable value
         }
         
         cpSpaceStep(space, dt);
-        
-        if (frameCount <= 3) {
-            LOG_DEBUG("Frame %d: Starting render...", frameCount);
-        }
 
         // Clear screen
-        if (frameCount <= 3) {
-            LOG_DEBUG("Frame %d: Setting clear color and clearing screen...", frameCount);
-        }
-        if (SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255) != 0) {
-            LOG_ERROR("SDL_SetRenderDrawColor failed: %s", SDL_GetError());
-        }
-        if (SDL_RenderClear(renderer) != 0) {
-            LOG_ERROR("SDL_RenderClear failed: %s", SDL_GetError());
-        }
-        if (frameCount <= 3) {
-            LOG_DEBUG("Frame %d: Screen cleared successfully", frameCount);
-        }
+        SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
+        SDL_RenderClear(renderer);
 
         // Draw ground
-        if (frameCount <= 3) {
-            LOG_DEBUG("Frame %d: Drawing ground...", frameCount);
-        }
-        if (SDL_SetRenderDrawColor(renderer, 100, 100, 100, 255) != 0) {
-            LOG_ERROR("SDL_SetRenderDrawColor for ground failed: %s", SDL_GetError());
-        }
+        SDL_SetRenderDrawColor(renderer, 100, 100, 100, 255);
         SDL_Rect groundRect = {
             0, 
             WINDOW_HEIGHT - GROUND_HEIGHT, 
             WINDOW_WIDTH, 
             GROUND_HEIGHT
         };
-        if (SDL_RenderFillRect(renderer, &groundRect) != 0) {
-            LOG_ERROR("SDL_RenderFillRect for ground failed: %s", SDL_GetError());
-        }
-        if (frameCount <= 3) {
-            LOG_DEBUG("Frame %d: Ground drawn successfully", frameCount);
-        }
+        SDL_RenderFillRect(renderer, &groundRect);
 
         // Draw all boxes
-        if (frameCount <= 3) {
-            LOG_DEBUG("Frame %d: Drawing %d boxes/sprites...", frameCount, boxCount);
-        }
         for (int i = 0; i < boxCount; i++) {
             cpVect pos = cpBodyGetPosition(boxes[i].body);
             cpFloat angle = cpBodyGetAngle(boxes[i].body);
@@ -908,18 +661,20 @@ int main(int argc, char* argv[]) {
             int x, y;
             cpToSDL(pos, &x, &y);
             
-            if (frameCount <= 3) {
-                LOG_DEBUG("Frame %d: Drawing box %d at (%d, %d)", frameCount, i, x, y);
-            }
-            
             if (i == 0) {
                 // Draw player as animated sprite
-                if (frameCount <= 3) {
-                    LOG_DEBUG("Frame %d: Rendering player sprite...", frameCount);
-                }
-                renderSprite(renderer, &playerSprite, x, y);
-                if (frameCount <= 3) {
-                    LOG_DEBUG("Frame %d: Player sprite rendered successfully", frameCount);
+                if (playerSprite.texture) {
+                    renderSprite(renderer, &playerSprite, x, y);
+                } else {
+                    // Fallback to rectangle if sprite failed to load
+                    SDL_SetRenderDrawColor(renderer, 0, 255, 0, 255);
+                    SDL_Rect boxRect = {
+                        x - BOX_SIZE/2,
+                        y - BOX_SIZE/2,
+                        BOX_SIZE,
+                        BOX_SIZE
+                    };
+                    SDL_RenderFillRect(renderer, &boxRect);
                 }
             } else {
                 // Draw other boxes as rectangles
@@ -953,35 +708,13 @@ int main(int argc, char* argv[]) {
         }
 
         // Present
-        if (frameCount <= 3) {
-            LOG_DEBUG("Frame %d: Presenting rendered frame...", frameCount);
-        }
         SDL_RenderPresent(renderer);
-        if (frameCount <= 3) {
-            LOG_DEBUG("Frame %d: Frame presented successfully", frameCount);
-        }
-        
-        // Log every second
-        if (frameCount % 60 == 0) {
-            LOG_INFO("Frame %d: Running at approximately 60 FPS", frameCount);
-        }
-        
-        if (frameCount <= 3) {
-            LOG_DEBUG("Frame %d: Frame completed successfully", frameCount);
-        }
 
         // Cap framerate
-        if (frameCount <= 3) {
-            LOG_DEBUG("Frame %d: Starting frame delay...", frameCount);
-        }
         SDL_Delay(16); // ~60 FPS
-        if (frameCount <= 3) {
-            LOG_DEBUG("Frame %d: Frame delay completed", frameCount);
-        }
     }
 
     // Cleanup
-    LOG_INFO("Starting cleanup...");
     destroySprite(&playerSprite);
     for (int i = 0; i < boxCount; i++) {
         cpShapeFree(boxes[i].shape);
@@ -990,14 +723,10 @@ int main(int argc, char* argv[]) {
     cpShapeFree(ground);
     cpSpaceFree(space);
     
-    LOG_INFO("Destroying SDL resources...");
     SDL_DestroyRenderer(renderer);
     SDL_DestroyWindow(window);
     IMG_Quit();
     SDL_Quit();
-    
-    LOG_INFO("Exiting cleanly");
-    log_close();
 
     return 0;
 }
