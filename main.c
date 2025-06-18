@@ -11,6 +11,10 @@
 #ifdef __linux__
 #include <execinfo.h>
 #include <unistd.h>
+#elif defined(_WIN32)
+#include <windows.h>
+#include <dbghelp.h>
+#include <imagehlp.h>
 #endif
 
 #ifndef M_PI
@@ -46,6 +50,92 @@ typedef struct {
     ShapeType type;
 } DebugShape;
 
+#ifdef _WIN32
+// Windows-specific stack trace function
+void print_windows_stack_trace(FILE *output_file) {
+    HANDLE process = GetCurrentProcess();
+    HANDLE thread = GetCurrentThread();
+    
+    // Initialize symbol handler
+    SymInitialize(process, NULL, TRUE);
+    SymSetOptions(SYMOPT_LOAD_LINES | SYMOPT_FAIL_CRITICAL_ERRORS);
+    
+    // Get the current context
+    CONTEXT context;
+    memset(&context, 0, sizeof(CONTEXT));
+    context.ContextFlags = CONTEXT_FULL;
+    RtlCaptureContext(&context);
+    
+    // Setup stack frame for walking
+    STACKFRAME64 frame;
+    memset(&frame, 0, sizeof(STACKFRAME64));
+    
+    #ifdef _M_X64
+    DWORD machineType = IMAGE_FILE_MACHINE_AMD64;
+    frame.AddrPC.Offset = context.Rip;
+    frame.AddrPC.Mode = AddrModeFlat;
+    frame.AddrFrame.Offset = context.Rsp;
+    frame.AddrFrame.Mode = AddrModeFlat;
+    frame.AddrStack.Offset = context.Rsp;
+    frame.AddrStack.Mode = AddrModeFlat;
+    #else
+    DWORD machineType = IMAGE_FILE_MACHINE_I386;
+    frame.AddrPC.Offset = context.Eip;
+    frame.AddrPC.Mode = AddrModeFlat;
+    frame.AddrFrame.Offset = context.Ebp;
+    frame.AddrFrame.Mode = AddrModeFlat;
+    frame.AddrStack.Offset = context.Esp;
+    frame.AddrStack.Mode = AddrModeFlat;
+    #endif
+    
+    // Walk the stack
+    int frame_count = 0;
+    while (frame_count < 10 && 
+           StackWalk64(machineType, process, thread, &frame, &context, 
+                      NULL, SymFunctionTableAccess64, SymGetModuleBase64, NULL)) {
+        
+        if (frame.AddrPC.Offset == 0) break;
+        
+        // Get symbol information
+        char buffer[sizeof(SYMBOL_INFO) + MAX_SYM_NAME * sizeof(TCHAR)];
+        SYMBOL_INFO* symbol = (SYMBOL_INFO*)buffer;
+        symbol->SizeOfStruct = sizeof(SYMBOL_INFO);
+        symbol->MaxNameLen = MAX_SYM_NAME;
+        
+        DWORD64 displacement = 0;
+        char symbol_name[256] = "Unknown";
+        
+        if (SymFromAddr(process, frame.AddrPC.Offset, &displacement, symbol)) {
+            strncpy(symbol_name, symbol->Name, sizeof(symbol_name) - 1);
+            symbol_name[sizeof(symbol_name) - 1] = '\0';
+        }
+        
+        // Get line information
+        IMAGEHLP_LINE64 line;
+        line.SizeOfStruct = sizeof(IMAGEHLP_LINE64);
+        DWORD line_displacement = 0;
+        char file_info[512] = "";
+        
+        if (SymGetLineFromAddr64(process, frame.AddrPC.Offset, &line_displacement, &line)) {
+            snprintf(file_info, sizeof(file_info), " [%s:%lu]", line.FileName, line.LineNumber);
+        }
+        
+        // Print frame information
+        fprintf(stderr, "  #%d: 0x%llx %s%s\n", frame_count, 
+                (unsigned long long)frame.AddrPC.Offset, symbol_name, file_info);
+        
+        if (output_file) {
+            fprintf(output_file, "  #%d: 0x%llx %s%s\n", frame_count, 
+                    (unsigned long long)frame.AddrPC.Offset, symbol_name, file_info);
+        }
+        
+        frame_count++;
+    }
+    
+    SymCleanup(process);
+}
+#endif
+
 // Crash handler function
 void crash_handler(int sig) {
     FILE *crash_file = NULL;
@@ -72,7 +162,7 @@ void crash_handler(int sig) {
     }
     
 #ifdef __linux__
-    // Get stack trace (Linux only)
+    // Get stack trace (Linux)
     void *array[10];
     size_t size;
     char **strings;
@@ -94,6 +184,14 @@ void crash_handler(int sig) {
     }
     
     free(strings);
+#elif defined(_WIN32)
+    // Get stack trace (Windows)
+    fprintf(stderr, "Stack trace (Windows):\n");
+    if (crash_file) {
+        fprintf(crash_file, "Stack trace (Windows):\n");
+    }
+    
+    print_windows_stack_trace(crash_file);
 #else
     // No stack trace available on this platform
     fprintf(stderr, "Stack trace not available on this platform\n");

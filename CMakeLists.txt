@@ -80,12 +80,24 @@ target_link_directories(platformer PRIVATE
 
 # On Windows with MinGW, we need special handling
 if(WIN32 AND MINGW)
-    # MinGW requires specific library order
+    # MinGW requires specific library order and debugging libraries
     target_link_libraries(platformer 
         mingw32
         ${SDL2_LDFLAGS}
         ${SDL2_IMAGE_LDFLAGS}
         ${CHIPMUNK_LIBRARIES}
+        dbghelp
+        imagehlp
+        m
+    )
+elseif(WIN32)
+    # Other Windows compilers
+    target_link_libraries(platformer 
+        ${SDL2_LDFLAGS}
+        ${SDL2_IMAGE_LDFLAGS}
+        ${CHIPMUNK_LIBRARIES}
+        dbghelp
+        imagehlp
         m
     )
 else()
