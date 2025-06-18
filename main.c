@@ -88,28 +88,40 @@ cpVect sdlToCP(int x, int y) {
 
 // Load character spritesheet from file
 SDL_Texture* loadCharacterSpritesheet(SDL_Renderer *renderer) {
+    LOG_DEBUG("Attempting to load character spritesheet from ./assets/characters.png");
     SDL_Texture *texture = IMG_LoadTexture(renderer, "./assets/characters.png");
     if (!texture) {
+        LOG_ERROR("Failed to load character spritesheet: %s", IMG_GetError());
         printf("Failed to load character spritesheet: %s\n", IMG_GetError());
         return NULL;
     }
+    LOG_DEBUG("Character spritesheet loaded successfully");
     return texture;
 }
 
 // Initialize sprite with character spritesheet
 Sprite createCharacterSprite(SDL_Renderer *renderer) {
+    LOG_DEBUG("Creating character sprite...");
     Sprite sprite = {0};
     
     // Load character spritesheet
     sprite.texture = loadCharacterSpritesheet(renderer);
     if (!sprite.texture) {
+        LOG_ERROR("Failed to create character sprite - texture loading failed");
         printf("Failed to create character sprite\n");
         return sprite;
     }
     
     // Allocate animations
+    LOG_DEBUG("Allocating memory for %d animations", ANIM_COUNT);
     sprite.animationCount = ANIM_COUNT;
     sprite.animations = malloc(sizeof(Animation) * ANIM_COUNT);
+    if (!sprite.animations) {
+        LOG_ERROR("Failed to allocate memory for animations");
+        SDL_DestroyTexture(sprite.texture);
+        sprite.texture = NULL;
+        return sprite;
+    }
     
     // Setup idle animation - frame (1,0) = x:0, y:32, 32x32 (swapped x,y)
     sprite.animations[ANIM_IDLE].frameCount = 1;
@@ -136,12 +148,14 @@ Sprite createCharacterSprite(SDL_Renderer *renderer) {
     sprite.animations[ANIM_JUMP].loop = false;
     
     // Start with idle animation, facing right
+    LOG_DEBUG("Setting up initial sprite state");
     sprite.currentAnimation = ANIM_IDLE;
     sprite.currentFrame = 0;
     sprite.animationTimer = 0.0f;
     sprite.isPlaying = true;
     sprite.facingLeft = false;
     
+    LOG_DEBUG("Character sprite created successfully");
     return sprite;
 }
 
@@ -395,23 +409,40 @@ int main(int argc, char* argv[]) {
         LOG_ERROR("Window creation failed: %s", SDL_GetError());
         printf("Window creation failed: %s\n", SDL_GetError());
         SDL_Quit();
+        log_close();
         return 1;
     }
+    LOG_INFO("SDL window created successfully");
 
     // Create renderer
+    LOG_INFO("Creating SDL renderer...");
     SDL_Renderer *renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED);
     if (!renderer) {
+        LOG_ERROR("Renderer creation failed: %s", SDL_GetError());
         printf("Renderer creation failed: %s\n", SDL_GetError());
         SDL_DestroyWindow(window);
         SDL_Quit();
+        log_close();
         return 1;
     }
+    LOG_INFO("SDL renderer created successfully");
 
     // Create Chipmunk space
+    LOG_INFO("Creating Chipmunk physics space...");
     cpSpace *space = cpSpaceNew();
+    if (!space) {
+        LOG_ERROR("Failed to create Chipmunk space");
+        SDL_DestroyRenderer(renderer);
+        SDL_DestroyWindow(window);
+        SDL_Quit();
+        log_close();
+        return 1;
+    }
     cpSpaceSetGravity(space, cpv(0, -980)); // Gravity pointing down
+    LOG_INFO("Chipmunk physics space created successfully");
 
     // Create static ground body
+    LOG_INFO("Creating ground physics body...");
     cpBody *groundBody = cpSpaceGetStaticBody(space);
     cpShape *ground = cpSegmentShapeNew(groundBody, 
         cpv(0, GROUND_HEIGHT), 
@@ -419,6 +450,7 @@ int main(int argc, char* argv[]) {
         0.0f);
     cpShapeSetFriction(ground, 0.3f);
     cpSpaceAddShape(space, ground);
+    LOG_INFO("Ground physics body created successfully");
 
     // Initialize box array
     Box boxes[MAX_BOXES];
@@ -433,13 +465,17 @@ int main(int argc, char* argv[]) {
     bool jumpPressed = false;
     
     // Create initial box (player)
+    LOG_INFO("Creating player physics body...");
     boxes[boxCount] = createBox(space, cpv(WINDOW_WIDTH / 2, WINDOW_HEIGHT - 50));
     cpBody *playerBody = boxes[0].body; // Keep reference to player body
     cpShape *playerShape = boxes[0].shape; // Keep reference to player shape
     boxCount++;
+    LOG_INFO("Player physics body created successfully");
     
     // Create player sprite
+    LOG_INFO("Loading player sprite...");
     Sprite playerSprite = createCharacterSprite(renderer);
+    LOG_INFO("Player sprite loaded successfully");
 
     // Main loop
     bool running = true;
@@ -450,6 +486,12 @@ int main(int argc, char* argv[]) {
     
     while (running) {
         frameCount++;
+        
+        // Log first few frames for debugging
+        if (frameCount <= 3) {
+            LOG_DEBUG("Frame %d starting...", frameCount);
+        }
+        
         Uint32 currentTime = SDL_GetTicks();
         cpFloat dt = (currentTime - lastTime) / 1000.0f;
         
@@ -460,9 +502,16 @@ int main(int argc, char* argv[]) {
         }
         
         lastTime = currentTime;
+        
+        if (frameCount <= 3) {
+            LOG_DEBUG("Frame %d: dt=%f, starting event handling...", frameCount, dt);
+        }
 
         // Handle events
         int eventCount = 0;
+        if (frameCount <= 3) {
+            LOG_DEBUG("Frame %d: Starting SDL_PollEvent loop...", frameCount);
+        }
         while (SDL_PollEvent(&event)) {
             eventCount++;
             if (eventCount > 100) {
@@ -525,13 +574,24 @@ int main(int argc, char* argv[]) {
                 }
             }
         }
+        
+        if (frameCount <= 3) {
+            LOG_DEBUG("Frame %d: Event handling complete, processed %d events", frameCount, eventCount);
+        }
 
         // Update player movement
+        if (frameCount <= 3) {
+            LOG_DEBUG("Frame %d: Starting player movement update...", frameCount);
+        }
         if (frameCount % 60 == 0) {
             LOG_DEBUG("Frame %d: Input state - left:%d right:%d jump:%d", 
                      frameCount, leftPressed, rightPressed, jumpPressed);
         }
         updatePlayerMovement(space, playerBody, playerShape, leftPressed, rightPressed, jumpPressed);
+        
+        if (frameCount <= 3) {
+            LOG_DEBUG("Frame %d: Starting sprite animation update...", frameCount);
+        }
         
         // Update player sprite animation based on movement state
         cpVect vel = cpBodyGetVelocity(playerBody);
@@ -557,6 +617,10 @@ int main(int argc, char* argv[]) {
         // Update sprite animation timer
         updateSprite(&playerSprite, dt);
         
+        if (frameCount <= 3) {
+            LOG_DEBUG("Frame %d: Starting physics update...", frameCount);
+        }
+        
         // Update physics
         // Additional safety check - this shouldn't happen now but keep as backup
         if (dt > 0.033f) {
@@ -570,6 +634,10 @@ int main(int argc, char* argv[]) {
         }
         
         cpSpaceStep(space, dt);
+        
+        if (frameCount <= 3) {
+            LOG_DEBUG("Frame %d: Starting render...", frameCount);
+        }
 
         // Clear screen
         SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
