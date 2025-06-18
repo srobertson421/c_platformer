@@ -52,10 +52,12 @@ message(STATUS "SDL2_FOUND: ${SDL2_FOUND}")
 message(STATUS "SDL2_INCLUDE_DIRS: ${SDL2_INCLUDE_DIRS}")
 message(STATUS "SDL2_LIBRARY_DIRS: ${SDL2_LIBRARY_DIRS}")
 message(STATUS "SDL2_LIBRARIES: ${SDL2_LIBRARIES}")
+message(STATUS "SDL2_LDFLAGS: ${SDL2_LDFLAGS}")
 message(STATUS "SDL2_IMAGE_FOUND: ${SDL2_IMAGE_FOUND}")
 message(STATUS "SDL2_IMAGE_INCLUDE_DIRS: ${SDL2_IMAGE_INCLUDE_DIRS}")
 message(STATUS "SDL2_IMAGE_LIBRARY_DIRS: ${SDL2_IMAGE_LIBRARY_DIRS}")
 message(STATUS "SDL2_IMAGE_LIBRARIES: ${SDL2_IMAGE_LIBRARIES}")
+message(STATUS "SDL2_IMAGE_LDFLAGS: ${SDL2_IMAGE_LDFLAGS}")
 message(STATUS "CHIPMUNK_INCLUDE_DIRS: ${CHIPMUNK_INCLUDE_DIRS}")
 message(STATUS "CHIPMUNK_LIBRARIES: ${CHIPMUNK_LIBRARIES}")
 
@@ -69,20 +71,32 @@ target_include_directories(platformer PRIVATE
     ${CHIPMUNK_INCLUDE_DIRS}
 )
 
-# Link libraries with full paths from pkg-config
+# Link directories - needed for pkg-config libraries
 target_link_directories(platformer PRIVATE
     ${SDL2_LIBRARY_DIRS}
     ${SDL2_IMAGE_LIBRARY_DIRS}
     ${CHIPMUNK_LIBRARY_DIRS}
 )
 
-# Link libraries
-target_link_libraries(platformer 
-    ${SDL2_LIBRARIES}
-    ${SDL2_IMAGE_LIBRARIES}
-    ${CHIPMUNK_LIBRARIES}
-    m
-)
+# On Windows with MinGW, we need special handling
+if(WIN32 AND MINGW)
+    # MinGW requires specific library order
+    target_link_libraries(platformer 
+        mingw32
+        ${SDL2_LDFLAGS}
+        ${SDL2_IMAGE_LDFLAGS}
+        ${CHIPMUNK_LIBRARIES}
+        m
+    )
+else()
+    # Other platforms
+    target_link_libraries(platformer 
+        ${SDL2_LDFLAGS}
+        ${SDL2_IMAGE_LDFLAGS}
+        ${CHIPMUNK_LIBRARIES}
+        m
+    )
+endif()
 
 # Add compile flags
 target_compile_options(platformer PRIVATE 
@@ -91,11 +105,6 @@ target_compile_options(platformer PRIVATE
     ${CHIPMUNK_CFLAGS_OTHER}
     -Wall -Wextra
 )
-
-# On Windows with MinGW, we might need to link additional libraries
-if(WIN32 AND MINGW)
-    target_link_libraries(platformer mingw32 SDL2main)
-endif()
 
 # On macOS, we might need to add frameworks
 if(APPLE)
