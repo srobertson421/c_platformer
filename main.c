@@ -195,12 +195,24 @@ void setSpriteAnimation(Sprite *sprite, int animation) {
 
 // Render sprite at given position with optional horizontal flipping
 void renderSprite(SDL_Renderer *renderer, Sprite *sprite, int x, int y) {
-    if (!sprite->texture || sprite->animationCount == 0) return;
+    LOG_DEBUG("renderSprite called at (%d, %d)", x, y);
+    
+    if (!sprite->texture || sprite->animationCount == 0) {
+        LOG_WARNING("renderSprite: Invalid sprite data (texture=%p, animCount=%d)", 
+                   (void*)sprite->texture, sprite->animationCount);
+        return;
+    }
     
     Animation *anim = &sprite->animations[sprite->currentAnimation];
-    if (sprite->currentFrame >= anim->frameCount) return;
+    if (sprite->currentFrame >= anim->frameCount) {
+        LOG_WARNING("renderSprite: Invalid frame index %d >= %d", 
+                   sprite->currentFrame, anim->frameCount);
+        return;
+    }
     
     SpriteFrame *frame = &anim->frames[sprite->currentFrame];
+    LOG_DEBUG("renderSprite: Using frame %d, src rect (%d,%d,%d,%d)", 
+             sprite->currentFrame, frame->x, frame->y, frame->width, frame->height);
     
     SDL_Rect srcRect = {
         frame->x, frame->y,
@@ -215,9 +227,17 @@ void renderSprite(SDL_Renderer *renderer, Sprite *sprite, int x, int y) {
         spriteSize, spriteSize               // Double scale (100x100)
     };
     
+    LOG_DEBUG("renderSprite: Dest rect (%d,%d,%d,%d)", 
+             dstRect.x, dstRect.y, dstRect.w, dstRect.h);
+    
     // Use SDL_RenderCopyEx for flipping support
     SDL_RendererFlip flip = sprite->facingLeft ? SDL_FLIP_HORIZONTAL : SDL_FLIP_NONE;
-    SDL_RenderCopyEx(renderer, sprite->texture, &srcRect, &dstRect, 0.0, NULL, flip);
+    LOG_DEBUG("renderSprite: Calling SDL_RenderCopyEx...");
+    if (SDL_RenderCopyEx(renderer, sprite->texture, &srcRect, &dstRect, 0.0, NULL, flip) != 0) {
+        LOG_ERROR("SDL_RenderCopyEx failed: %s", SDL_GetError());
+    } else {
+        LOG_DEBUG("renderSprite: SDL_RenderCopyEx completed successfully");
+    }
 }
 
 // Cleanup sprite resources
@@ -640,20 +660,43 @@ int main(int argc, char* argv[]) {
         }
 
         // Clear screen
-        SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
-        SDL_RenderClear(renderer);
+        if (frameCount <= 3) {
+            LOG_DEBUG("Frame %d: Setting clear color and clearing screen...", frameCount);
+        }
+        if (SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255) != 0) {
+            LOG_ERROR("SDL_SetRenderDrawColor failed: %s", SDL_GetError());
+        }
+        if (SDL_RenderClear(renderer) != 0) {
+            LOG_ERROR("SDL_RenderClear failed: %s", SDL_GetError());
+        }
+        if (frameCount <= 3) {
+            LOG_DEBUG("Frame %d: Screen cleared successfully", frameCount);
+        }
 
         // Draw ground
-        SDL_SetRenderDrawColor(renderer, 100, 100, 100, 255);
+        if (frameCount <= 3) {
+            LOG_DEBUG("Frame %d: Drawing ground...", frameCount);
+        }
+        if (SDL_SetRenderDrawColor(renderer, 100, 100, 100, 255) != 0) {
+            LOG_ERROR("SDL_SetRenderDrawColor for ground failed: %s", SDL_GetError());
+        }
         SDL_Rect groundRect = {
             0, 
             WINDOW_HEIGHT - GROUND_HEIGHT, 
             WINDOW_WIDTH, 
             GROUND_HEIGHT
         };
-        SDL_RenderFillRect(renderer, &groundRect);
+        if (SDL_RenderFillRect(renderer, &groundRect) != 0) {
+            LOG_ERROR("SDL_RenderFillRect for ground failed: %s", SDL_GetError());
+        }
+        if (frameCount <= 3) {
+            LOG_DEBUG("Frame %d: Ground drawn successfully", frameCount);
+        }
 
         // Draw all boxes
+        if (frameCount <= 3) {
+            LOG_DEBUG("Frame %d: Drawing %d boxes/sprites...", frameCount, boxCount);
+        }
         for (int i = 0; i < boxCount; i++) {
             cpVect pos = cpBodyGetPosition(boxes[i].body);
             cpFloat angle = cpBodyGetAngle(boxes[i].body);
@@ -661,9 +704,19 @@ int main(int argc, char* argv[]) {
             int x, y;
             cpToSDL(pos, &x, &y);
             
+            if (frameCount <= 3) {
+                LOG_DEBUG("Frame %d: Drawing box %d at (%d, %d)", frameCount, i, x, y);
+            }
+            
             if (i == 0) {
                 // Draw player as animated sprite
+                if (frameCount <= 3) {
+                    LOG_DEBUG("Frame %d: Rendering player sprite...", frameCount);
+                }
                 renderSprite(renderer, &playerSprite, x, y);
+                if (frameCount <= 3) {
+                    LOG_DEBUG("Frame %d: Player sprite rendered successfully", frameCount);
+                }
             } else {
                 // Draw other boxes as rectangles
                 SDL_SetRenderDrawColor(renderer, 255, 100, 100, 255);
@@ -696,15 +749,31 @@ int main(int argc, char* argv[]) {
         }
 
         // Present
+        if (frameCount <= 3) {
+            LOG_DEBUG("Frame %d: Presenting rendered frame...", frameCount);
+        }
         SDL_RenderPresent(renderer);
+        if (frameCount <= 3) {
+            LOG_DEBUG("Frame %d: Frame presented successfully", frameCount);
+        }
         
         // Log every second
         if (frameCount % 60 == 0) {
             LOG_INFO("Frame %d: Running at approximately 60 FPS", frameCount);
         }
+        
+        if (frameCount <= 3) {
+            LOG_DEBUG("Frame %d: Frame completed successfully", frameCount);
+        }
 
         // Cap framerate
+        if (frameCount <= 3) {
+            LOG_DEBUG("Frame %d: Starting frame delay...", frameCount);
+        }
         SDL_Delay(16); // ~60 FPS
+        if (frameCount <= 3) {
+            LOG_DEBUG("Frame %d: Frame delay completed", frameCount);
+        }
     }
 
     // Cleanup
