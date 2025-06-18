@@ -7,9 +7,11 @@
 #include <stdlib.h>
 #include <math.h>
 #include <signal.h>
+#include <time.h>
+#ifdef __linux__
 #include <execinfo.h>
 #include <unistd.h>
-#include <time.h>
+#endif
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
@@ -46,10 +48,6 @@ typedef struct {
 
 // Crash handler function
 void crash_handler(int sig) {
-    void *array[10];
-    size_t size;
-    char **strings;
-    size_t i;
     FILE *crash_file = NULL;
     time_t now;
     char time_str[64];
@@ -73,7 +71,13 @@ void crash_handler(int sig) {
         fprintf(crash_file, "Signal: %d\n", sig);
     }
     
-    // Get stack trace
+#ifdef __linux__
+    // Get stack trace (Linux only)
+    void *array[10];
+    size_t size;
+    char **strings;
+    size_t i;
+    
     size = backtrace(array, 10);
     strings = backtrace_symbols(array, size);
     
@@ -90,6 +94,13 @@ void crash_handler(int sig) {
     }
     
     free(strings);
+#else
+    // No stack trace available on this platform
+    fprintf(stderr, "Stack trace not available on this platform\n");
+    if (crash_file) {
+        fprintf(crash_file, "Stack trace not available on this platform\n");
+    }
+#endif
     
     fprintf(stderr, "=== END CRASH INFO ===\n");
     if (crash_file) {
