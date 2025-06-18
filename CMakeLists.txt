@@ -4,63 +4,17 @@ project(ChipmunkSDLDemo C)
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 
-# Create the main executable
-add_executable(platformer main.c)
-
-# Find pkg-config first
-find_package(PkgConfig)
+# Find pkg-config first - required for most libraries
+find_package(PkgConfig REQUIRED)
 
 # Find SDL2
-if(PKG_CONFIG_FOUND)
-    pkg_check_modules(SDL2 sdl2)
-endif()
-if(NOT SDL2_FOUND)
-    find_package(SDL2 REQUIRED)
-endif()
+pkg_check_modules(SDL2 REQUIRED sdl2)
 
 # Find SDL2_image
-set(SDL2_IMAGE_FOUND FALSE)
-if(PKG_CONFIG_FOUND)
-    pkg_check_modules(SDL2_IMAGE SDL2_image)
-endif()
-
-if(NOT SDL2_IMAGE_FOUND)
-    # Try to find SDL2_image manually
-    find_path(SDL2_IMAGE_INCLUDE_DIR SDL_image.h
-        HINTS
-        ${SDL2_INCLUDE_DIRS}
-        PATHS
-        /usr/include/SDL2
-        /usr/local/include/SDL2
-        /opt/homebrew/include/SDL2
-        /opt/local/include/SDL2
-    )
-    
-    find_library(SDL2_IMAGE_LIBRARY
-        NAMES SDL2_image
-        PATHS
-        /usr/lib
-        /usr/local/lib
-        /opt/homebrew/lib
-        /opt/local/lib
-    )
-    
-    if(SDL2_IMAGE_INCLUDE_DIR AND SDL2_IMAGE_LIBRARY)
-        set(SDL2_IMAGE_FOUND TRUE)
-        set(SDL2_IMAGE_INCLUDE_DIRS ${SDL2_IMAGE_INCLUDE_DIR})
-        set(SDL2_IMAGE_LIBRARIES ${SDL2_IMAGE_LIBRARY})
-    endif()
-endif()
-
-if(NOT SDL2_IMAGE_FOUND)
-    message(FATAL_ERROR "SDL2_image not found. Please install it using your package manager.")
-endif()
+pkg_check_modules(SDL2_IMAGE REQUIRED SDL2_image)
 
 # Find Chipmunk2D
-set(CHIPMUNK_FOUND FALSE)
-if(PKG_CONFIG_FOUND)
-    pkg_check_modules(CHIPMUNK chipmunk)
-endif()
+pkg_check_modules(CHIPMUNK chipmunk)
 
 if(NOT CHIPMUNK_FOUND)
     # Try to find Chipmunk library directly
@@ -70,6 +24,7 @@ if(NOT CHIPMUNK_FOUND)
         /usr/local/include
         /opt/homebrew/include
         /opt/local/include
+        ${CMAKE_PREFIX_PATH}/include
     )
     
     find_library(CHIPMUNK_LIBRARY
@@ -79,30 +34,46 @@ if(NOT CHIPMUNK_FOUND)
         /usr/local/lib
         /opt/homebrew/lib
         /opt/local/lib
+        ${CMAKE_PREFIX_PATH}/lib
     )
     
     if(CHIPMUNK_INCLUDE_DIR AND CHIPMUNK_LIBRARY)
         set(CHIPMUNK_FOUND TRUE)
         set(CHIPMUNK_INCLUDE_DIRS ${CHIPMUNK_INCLUDE_DIR})
         set(CHIPMUNK_LIBRARIES ${CHIPMUNK_LIBRARY})
+        message(STATUS "Found Chipmunk: ${CHIPMUNK_LIBRARY}")
     else()
         message(FATAL_ERROR "Chipmunk2D not found. Please install it using your package manager.")
     endif()
 endif()
 
 # Debug output
+message(STATUS "SDL2_FOUND: ${SDL2_FOUND}")
 message(STATUS "SDL2_INCLUDE_DIRS: ${SDL2_INCLUDE_DIRS}")
+message(STATUS "SDL2_LIBRARY_DIRS: ${SDL2_LIBRARY_DIRS}")
 message(STATUS "SDL2_LIBRARIES: ${SDL2_LIBRARIES}")
+message(STATUS "SDL2_IMAGE_FOUND: ${SDL2_IMAGE_FOUND}")
 message(STATUS "SDL2_IMAGE_INCLUDE_DIRS: ${SDL2_IMAGE_INCLUDE_DIRS}")
+message(STATUS "SDL2_IMAGE_LIBRARY_DIRS: ${SDL2_IMAGE_LIBRARY_DIRS}")
 message(STATUS "SDL2_IMAGE_LIBRARIES: ${SDL2_IMAGE_LIBRARIES}")
 message(STATUS "CHIPMUNK_INCLUDE_DIRS: ${CHIPMUNK_INCLUDE_DIRS}")
 message(STATUS "CHIPMUNK_LIBRARIES: ${CHIPMUNK_LIBRARIES}")
+
+# Create the main executable
+add_executable(platformer main.c)
 
 # Include directories
 target_include_directories(platformer PRIVATE 
     ${SDL2_INCLUDE_DIRS}
     ${SDL2_IMAGE_INCLUDE_DIRS}
     ${CHIPMUNK_INCLUDE_DIRS}
+)
+
+# Link libraries with full paths from pkg-config
+target_link_directories(platformer PRIVATE
+    ${SDL2_LIBRARY_DIRS}
+    ${SDL2_IMAGE_LIBRARY_DIRS}
+    ${CHIPMUNK_LIBRARY_DIRS}
 )
 
 # Link libraries
@@ -114,18 +85,10 @@ target_link_libraries(platformer
 )
 
 # Add compile flags
-if(SDL2_CFLAGS_OTHER)
-    target_compile_options(platformer PRIVATE ${SDL2_CFLAGS_OTHER})
-endif()
-if(SDL2_IMAGE_CFLAGS_OTHER)
-    target_compile_options(platformer PRIVATE ${SDL2_IMAGE_CFLAGS_OTHER})
-endif()
-if(CHIPMUNK_CFLAGS_OTHER)
-    target_compile_options(platformer PRIVATE ${CHIPMUNK_CFLAGS_OTHER})
-endif()
-
-# Compiler flags
 target_compile_options(platformer PRIVATE 
+    ${SDL2_CFLAGS_OTHER}
+    ${SDL2_IMAGE_CFLAGS_OTHER}
+    ${CHIPMUNK_CFLAGS_OTHER}
     -Wall -Wextra
 )
 
