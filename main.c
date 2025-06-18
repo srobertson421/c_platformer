@@ -349,7 +349,10 @@ void drawDebugShape(SDL_Renderer *renderer, cpShape *shape, ShapeType type) {
     }
 }
 
-int main(void) {
+int main(int argc, char* argv[]) {
+    // Suppress unused parameter warnings
+    (void)argc;
+    (void)argv;
     // Initialize SDL
     if (SDL_Init(SDL_INIT_VIDEO) < 0) {
         printf("SDL initialization failed: %s\n", SDL_GetError());
