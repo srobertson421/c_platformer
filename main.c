@@ -452,6 +452,13 @@ int main(int argc, char* argv[]) {
         frameCount++;
         Uint32 currentTime = SDL_GetTicks();
         cpFloat dt = (currentTime - lastTime) / 1000.0f;
+        
+        // Handle first frame case where dt would be 0
+        if (dt <= 0.0f) {
+            dt = 0.016f; // Default to 60 FPS
+            LOG_DEBUG("First frame or invalid dt, using default: %f", dt);
+        }
+        
         lastTime = currentTime;
 
         // Handle events
@@ -551,14 +558,15 @@ int main(int argc, char* argv[]) {
         updateSprite(&playerSprite, dt);
         
         // Update physics
-        // Clamp dt to prevent physics explosion on Windows
+        // Additional safety check - this shouldn't happen now but keep as backup
         if (dt > 0.033f) {
             LOG_WARNING("Large dt detected: %f, clamping to 0.033", dt);
             dt = 0.033f;
         }
-        if (dt <= 0.0f) {
-            LOG_WARNING("Invalid dt: %f, using 0.016", dt);
-            dt = 0.016f;
+        
+        // Log physics step occasionally for debugging
+        if (frameCount % 300 == 0) {
+            LOG_DEBUG("Physics step with dt: %f", dt);
         }
         
         cpSpaceStep(space, dt);
