@@ -506,9 +506,17 @@ int main(int argc, char* argv[]) {
         LOG_WARNING("Window does NOT have input focus");
     }
     
+    // Try to ensure window focus on Windows
+    SDL_RaiseWindow(window);
+    SDL_SetWindowInputFocus(window);
+    
     // Enable text input for debugging
     SDL_StartTextInput();
     LOG_INFO("Text input enabled");
+    
+    // Pump events to ensure everything is initialized
+    SDL_PumpEvents();
+    LOG_INFO("Initial event pump completed");
     
     // Main loop
     bool running = true;
@@ -544,6 +552,15 @@ int main(int argc, char* argv[]) {
         int eventCount = 0;
         if (frameCount <= 3) {
             LOG_DEBUG("Frame %d: Starting SDL_PollEvent loop...", frameCount);
+        }
+        
+        // Check keyboard state directly (Windows debugging)
+        if (frameCount % 120 == 0) { // Every 2 seconds
+            const Uint8* keystate = SDL_GetKeyboardState(NULL);
+            LOG_INFO("Direct keyboard state check - A:%d D:%d W:%d SPACE:%d LEFT:%d RIGHT:%d UP:%d", 
+                     keystate[SDL_SCANCODE_A], keystate[SDL_SCANCODE_D], keystate[SDL_SCANCODE_W], 
+                     keystate[SDL_SCANCODE_SPACE], keystate[SDL_SCANCODE_LEFT], keystate[SDL_SCANCODE_RIGHT], 
+                     keystate[SDL_SCANCODE_UP]);
         }
         
         // Log keyboard state every 60 frames (once per second)
@@ -691,6 +708,24 @@ int main(int argc, char* argv[]) {
             LOG_DEBUG("Frame %d: Input state - left:%d right:%d jump:%d", 
                      frameCount, leftPressed, rightPressed, jumpPressed);
         }
+        
+        // Windows workaround: Use direct keyboard state polling if events aren't working
+        if (frameCount > 300 && eventCount == 0) { // After 5 seconds with no events
+            const Uint8* keystate = SDL_GetKeyboardState(NULL);
+            bool directLeft = keystate[SDL_SCANCODE_A] || keystate[SDL_SCANCODE_LEFT];
+            bool directRight = keystate[SDL_SCANCODE_D] || keystate[SDL_SCANCODE_RIGHT];
+            bool directJump = keystate[SDL_SCANCODE_W] || keystate[SDL_SCANCODE_UP] || keystate[SDL_SCANCODE_SPACE];
+            
+            // Only log when there's a difference or input detected
+            if (directLeft || directRight || directJump || 
+                (directLeft != leftPressed) || (directRight != rightPressed) || (directJump != jumpPressed)) {
+                LOG_INFO("Using direct keyboard polling - left:%d right:%d jump:%d", directLeft, directRight, directJump);
+                leftPressed = directLeft;
+                rightPressed = directRight;
+                jumpPressed = directJump;
+            }
+        }
+        
         updatePlayerMovement(space, playerBody, playerShape, leftPressed, rightPressed, jumpPressed);
         
         if (frameCount <= 3) {
