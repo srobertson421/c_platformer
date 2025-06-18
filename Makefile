@@ -3,7 +3,7 @@ CFLAGS = -Wall -Wextra -std=c11 `sdl2-config --cflags`
 LDFLAGS = `sdl2-config --libs` -lSDL2_image -lchipmunk -lm
 
 TARGET = platformer
-SRC = main.c
+SRC = main.c logging.c
 
 all: $(TARGET)
 

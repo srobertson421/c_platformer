@@ -62,7 +62,7 @@ message(STATUS "CHIPMUNK_INCLUDE_DIRS: ${CHIPMUNK_INCLUDE_DIRS}")
 message(STATUS "CHIPMUNK_LIBRARIES: ${CHIPMUNK_LIBRARIES}")
 
 # Create the main executable
-add_executable(platformer main.c)
+add_executable(platformer main.c logging.c)
 
 # Include directories
 target_include_directories(platformer PRIVATE 

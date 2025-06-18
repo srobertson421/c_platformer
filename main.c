@@ -6,6 +6,7 @@
 #include <stdbool.h>
 #include <stdlib.h>
 #include <math.h>
+#include "logging.h"
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
@@ -353,21 +354,36 @@ int main(int argc, char* argv[]) {
     // Suppress unused parameter warnings
     (void)argc;
     (void)argv;
+    
+    // Initialize logging
+    log_init("platformer.log");
+    LOG_INFO("Starting platformer game");
+    LOG_INFO("Command line args: %d", argc);
+    
     // Initialize SDL
+    LOG_INFO("Initializing SDL...");
     if (SDL_Init(SDL_INIT_VIDEO) < 0) {
+        LOG_ERROR("SDL initialization failed: %s", SDL_GetError());
         printf("SDL initialization failed: %s\n", SDL_GetError());
+        log_close();
         return 1;
     }
+    LOG_INFO("SDL initialized successfully");
     
     // Initialize SDL_image
+    LOG_INFO("Initializing SDL_image...");
     int imgFlags = IMG_INIT_PNG | IMG_INIT_JPG;
     if (!(IMG_Init(imgFlags) & imgFlags)) {
+        LOG_ERROR("SDL_image initialization failed: %s", IMG_GetError());
         printf("SDL_image initialization failed: %s\n", IMG_GetError());
         SDL_Quit();
+        log_close();
         return 1;
     }
+    LOG_INFO("SDL_image initialized successfully");
 
     // Create window
+    LOG_INFO("Creating SDL window (%dx%d)...", WINDOW_WIDTH, WINDOW_HEIGHT);
     SDL_Window *window = SDL_CreateWindow(
         "Chipmunk2D Box Collision Demo",
         SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED,
@@ -376,6 +392,7 @@ int main(int argc, char* argv[]) {
     );
     
     if (!window) {
+        LOG_ERROR("Window creation failed: %s", SDL_GetError());
         printf("Window creation failed: %s\n", SDL_GetError());
         SDL_Quit();
         return 1;
@@ -428,47 +445,66 @@ int main(int argc, char* argv[]) {
     bool running = true;
     SDL_Event event;
     Uint32 lastTime = SDL_GetTicks();
+    int frameCount = 0;
+    LOG_INFO("Entering main game loop");
     
     while (running) {
+        frameCount++;
         Uint32 currentTime = SDL_GetTicks();
         cpFloat dt = (currentTime - lastTime) / 1000.0f;
         lastTime = currentTime;
 
         // Handle events
+        int eventCount = 0;
         while (SDL_PollEvent(&event)) {
+            eventCount++;
+            if (eventCount > 100) {
+                LOG_WARNING("Too many events in one frame: %d", eventCount);
+                break; // Prevent infinite loop
+            }
+            
             if (event.type == SDL_QUIT) {
+                LOG_INFO("Quit event received");
                 running = false;
             } else if (event.type == SDL_MOUSEBUTTONDOWN) {
+                LOG_DEBUG("Mouse button down at (%d, %d)", event.button.x, event.button.y);
                 if (event.button.button == SDL_BUTTON_LEFT && boxCount < MAX_BOXES) {
                     cpVect mousePos = sdlToCP(event.button.x, event.button.y);
                     boxes[boxCount] = createBox(space, mousePos);
                     boxCount++;
                 }
             } else if (event.type == SDL_KEYDOWN) {
+                LOG_DEBUG("Key down: %d (scancode: %d)", event.key.keysym.sym, event.key.keysym.scancode);
                 switch (event.key.keysym.sym) {
                     case SDLK_F1:
                         showDebug = !showDebug;
+                        LOG_INFO("Debug visualization: %s", showDebug ? "ON" : "OFF");
                         printf("Debug visualization: %s\n", showDebug ? "ON" : "OFF");
                         break;
                     case SDLK_a:
                     case SDLK_LEFT:
                         leftPressed = true;
+                        LOG_DEBUG("Left pressed");
                         break;
                     case SDLK_d:
                     case SDLK_RIGHT:
                         rightPressed = true;
+                        LOG_DEBUG("Right pressed");
                         break;
                     case SDLK_w:
                     case SDLK_UP:
                     case SDLK_SPACE:
                         jumpPressed = true;
+                        LOG_DEBUG("Jump pressed");
                         break;
                 }
             } else if (event.type == SDL_KEYUP) {
+                LOG_DEBUG("Key up: %d", event.key.keysym.sym);
                 switch (event.key.keysym.sym) {
                     case SDLK_a:
                     case SDLK_LEFT:
                         leftPressed = false;
+                        LOG_DEBUG("Left released");
                         break;
                     case SDLK_d:
                     case SDLK_RIGHT:
@@ -484,6 +520,10 @@ int main(int argc, char* argv[]) {
         }
 
         // Update player movement
+        if (frameCount % 60 == 0) {
+            LOG_DEBUG("Frame %d: Input state - left:%d right:%d jump:%d", 
+                     frameCount, leftPressed, rightPressed, jumpPressed);
+        }
         updatePlayerMovement(space, playerBody, playerShape, leftPressed, rightPressed, jumpPressed);
         
         // Update player sprite animation based on movement state
@@ -511,6 +551,16 @@ int main(int argc, char* argv[]) {
         updateSprite(&playerSprite, dt);
         
         // Update physics
+        // Clamp dt to prevent physics explosion on Windows
+        if (dt > 0.033f) {
+            LOG_WARNING("Large dt detected: %f, clamping to 0.033", dt);
+            dt = 0.033f;
+        }
+        if (dt <= 0.0f) {
+            LOG_WARNING("Invalid dt: %f, using 0.016", dt);
+            dt = 0.016f;
+        }
+        
         cpSpaceStep(space, dt);
 
         // Clear screen
@@ -571,12 +621,18 @@ int main(int argc, char* argv[]) {
 
         // Present
         SDL_RenderPresent(renderer);
+        
+        // Log every second
+        if (frameCount % 60 == 0) {
+            LOG_INFO("Frame %d: Running at approximately 60 FPS", frameCount);
+        }
 
         // Cap framerate
         SDL_Delay(16); // ~60 FPS
     }
 
     // Cleanup
+    LOG_INFO("Starting cleanup...");
     destroySprite(&playerSprite);
     for (int i = 0; i < boxCount; i++) {
         cpShapeFree(boxes[i].shape);
@@ -585,10 +641,14 @@ int main(int argc, char* argv[]) {
     cpShapeFree(ground);
     cpSpaceFree(space);
     
+    LOG_INFO("Destroying SDL resources...");
     SDL_DestroyRenderer(renderer);
     SDL_DestroyWindow(window);
     IMG_Quit();
     SDL_Quit();
+    
+    LOG_INFO("Exiting cleanly");
+    log_close();
 
     return 0;
 }
