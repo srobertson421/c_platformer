@@ -554,13 +554,38 @@ int main(int argc, char* argv[]) {
             LOG_DEBUG("Frame %d: Starting SDL_PollEvent loop...", frameCount);
         }
         
-        // Check keyboard state directly (Windows debugging)
-        if (frameCount % 120 == 0) { // Every 2 seconds
+        // Check keyboard state directly (Windows debugging) - more frequent for troubleshooting
+        if (frameCount % 30 == 0) { // Every 0.5 seconds for better responsiveness
             const Uint8* keystate = SDL_GetKeyboardState(NULL);
             LOG_INFO("Direct keyboard state check - A:%d D:%d W:%d SPACE:%d LEFT:%d RIGHT:%d UP:%d", 
                      keystate[SDL_SCANCODE_A], keystate[SDL_SCANCODE_D], keystate[SDL_SCANCODE_W], 
                      keystate[SDL_SCANCODE_SPACE], keystate[SDL_SCANCODE_LEFT], keystate[SDL_SCANCODE_RIGHT], 
                      keystate[SDL_SCANCODE_UP]);
+            
+            // If any keys are pressed, use direct input (bypass SDL events completely)
+            if (keystate[SDL_SCANCODE_A] || keystate[SDL_SCANCODE_LEFT]) {
+                leftPressed = true;
+                LOG_INFO("Direct input: LEFT key detected via keyboard state polling");
+            } else if (leftPressed) {
+                leftPressed = false;
+                LOG_INFO("Direct input: LEFT key released via keyboard state polling");
+            }
+            
+            if (keystate[SDL_SCANCODE_D] || keystate[SDL_SCANCODE_RIGHT]) {
+                rightPressed = true;
+                LOG_INFO("Direct input: RIGHT key detected via keyboard state polling");
+            } else if (rightPressed) {
+                rightPressed = false;
+                LOG_INFO("Direct input: RIGHT key released via keyboard state polling");
+            }
+            
+            if (keystate[SDL_SCANCODE_W] || keystate[SDL_SCANCODE_UP] || keystate[SDL_SCANCODE_SPACE]) {
+                jumpPressed = true;
+                LOG_INFO("Direct input: JUMP key detected via keyboard state polling");
+            } else if (jumpPressed) {
+                jumpPressed = false;
+                LOG_INFO("Direct input: JUMP key released via keyboard state polling");
+            }
         }
         
         // Log keyboard state every 60 frames (once per second)
@@ -608,15 +633,15 @@ int main(int argc, char* argv[]) {
                         LOG_WARNING("Suspicious MOUSEMOTION event (no movement, no buttons) - possible misclassified keyboard input");
                     }
                     
-                    // Try to detect keyboard scan codes in mouse motion data (Windows SDL bug workaround)
-                    if (event.motion.x > 0 && event.motion.x < 512) {
+                    // SDL scancodes are typically 0-255, so anything >255 is likely not a scancode
+                    // Let's look for patterns that might indicate misclassified keyboard input
+                    if (event.motion.x >= 0 && event.motion.x <= 255 && event.motion.y == 0) {
                         int scancode = event.motion.x;
                         LOG_WARNING("Possible keyboard scancode %d detected in MOUSEMOTION x coordinate", scancode);
                         
                         // Try to convert suspicious mouse motion to keyboard input
                         // SDL scancodes: A=4, D=7, W=26, SPACE=44, LEFT=80, RIGHT=79, UP=82
-                        // Key releases might have different patterns (e.g., in y coordinate or different values)
-                        bool isKeyPress = (event.motion.y == 0); // Assume press if y=0, release if y!=0
+                        bool isKeyPress = true; // Assume key press for now
                         
                         switch (scancode) {
                             case 4:   // A key (SDL_SCANCODE_A)
@@ -639,9 +664,15 @@ int main(int argc, char* argv[]) {
                                         isKeyPress ? "press" : "release");
                                 break;
                             default:
-                                LOG_DEBUG("Unknown scancode %d in MOUSEMOTION - not mapped to game input", scancode);
+                                if (scancode <= 255) {
+                                    LOG_DEBUG("Valid SDL scancode %d in MOUSEMOTION but not mapped to game input", scancode);
+                                } else {
+                                    LOG_DEBUG("Invalid scancode %d in MOUSEMOTION - outside valid range", scancode);
+                                }
                                 break;
                         }
+                    } else if (event.motion.x > 255) {
+                        LOG_DEBUG("Large x coordinate %d in MOUSEMOTION - likely actual mouse movement", event.motion.x);
                     }
                     
                     // Alternative pattern: check if scancodes appear in different fields
@@ -668,9 +699,18 @@ int main(int argc, char* argv[]) {
             } else if (event.type == SDL_MOUSEBUTTONDOWN) {
                 LOG_INFO("Mouse button %d down at (%d, %d)", event.button.button, event.button.x, event.button.y);
                 if (event.button.button == SDL_BUTTON_LEFT && boxCount < MAX_BOXES) {
-                    cpVect mousePos = sdlToCP(event.button.x, event.button.y);
-                    boxes[boxCount] = createBox(space, mousePos);
-                    boxCount++;
+                    // Add bounds checking for mouse position
+                    if (event.button.x >= 0 && event.button.x < WINDOW_WIDTH && 
+                        event.button.y >= 0 && event.button.y < WINDOW_HEIGHT) {
+                        cpVect mousePos = sdlToCP(event.button.x, event.button.y);
+                        LOG_DEBUG("Creating box at mouse position: SDL(%d,%d) -> Chipmunk(%.2f,%.2f)", 
+                                 event.button.x, event.button.y, mousePos.x, mousePos.y);
+                        boxes[boxCount] = createBox(space, mousePos);
+                        boxCount++;
+                        LOG_DEBUG("Box created successfully. Total boxes: %d", boxCount);
+                    } else {
+                        LOG_WARNING("Mouse click outside window bounds: (%d,%d)", event.button.x, event.button.y);
+                    }
                 }
             } else if (event.type == SDL_KEYDOWN) {
                 LOG_INFO("KEYDOWN: sym=%d scancode=%d mod=%d repeat=%d", 
@@ -769,22 +809,7 @@ int main(int argc, char* argv[]) {
                      frameCount, leftPressed, rightPressed, jumpPressed);
         }
         
-        // Windows workaround: Use direct keyboard state polling if events aren't working
-        if (frameCount > 300 && eventCount == 0) { // After 5 seconds with no events
-            const Uint8* keystate = SDL_GetKeyboardState(NULL);
-            bool directLeft = keystate[SDL_SCANCODE_A] || keystate[SDL_SCANCODE_LEFT];
-            bool directRight = keystate[SDL_SCANCODE_D] || keystate[SDL_SCANCODE_RIGHT];
-            bool directJump = keystate[SDL_SCANCODE_W] || keystate[SDL_SCANCODE_UP] || keystate[SDL_SCANCODE_SPACE];
-            
-            // Only log when there's a difference or input detected
-            if (directLeft || directRight || directJump || 
-                (directLeft != leftPressed) || (directRight != rightPressed) || (directJump != jumpPressed)) {
-                LOG_INFO("Using direct keyboard polling - left:%d right:%d jump:%d", directLeft, directRight, directJump);
-                leftPressed = directLeft;
-                rightPressed = directRight;
-                jumpPressed = directJump;
-            }
-        }
+        // Removed old fallback keyboard polling - now using more frequent direct polling above
         
         updatePlayerMovement(space, playerBody, playerShape, leftPressed, rightPressed, jumpPressed);
         
