@@ -50,10 +50,41 @@ typedef struct {
     ShapeType type;
 } DebugShape;
 
-#ifdef _WIN32
-// Forward declaration
-void print_windows_stack_trace_from_context(CONTEXT* context, FILE *output_file);
+// Forward declarations for cross-platform error handling
+void show_error_message(const char* title, const char* message);
+void safe_log_write(FILE* file, const char* format, ...);
 
+// Thread-safe logging with immediate flush
+void safe_log_write(FILE* file, const char* format, ...) {
+    if (!file) return;
+    
+    va_list args;
+    va_start(args, format);
+    vfprintf(file, format, args);
+    va_end(args);
+    
+    fflush(file);  // Critical: ensure data is written immediately
+}
+
+// Show error message box that works even if SDL isn't initialized
+void show_error_message(const char* title, const char* message) {
+#ifdef _WIN32
+    // Try SDL message box first (works even before SDL_Init in most cases)
+    if (SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, title, message, NULL) < 0) {
+        // Fallback to Windows MessageBox if SDL fails
+        MessageBoxA(NULL, message, title, MB_OK | MB_ICONERROR | MB_TOPMOST);
+    }
+#else
+    // For Linux/macOS, try SDL message box (may not work without display)
+    if (SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, title, message, NULL) < 0) {
+        // Fallback: print to stderr if SDL fails
+        fprintf(stderr, "\n=== %s ===\n%s\n=== END MESSAGE ===\n", title, message);
+        fflush(stderr);
+    }
+#endif
+}
+
+#ifdef _WIN32
 // Windows unhandled exception filter for catching crashes that don't trigger signals
 LONG WINAPI windows_exception_handler(EXCEPTION_POINTERS* exc_info) {
     FILE *crash_file = NULL;
@@ -67,18 +98,26 @@ LONG WINAPI windows_exception_handler(EXCEPTION_POINTERS* exc_info) {
     // Try to open crash log file
     crash_file = fopen("crash.log", "a");
     
+    // Show immediate alert to user
+    char alert_msg[512];
+    snprintf(alert_msg, sizeof(alert_msg), 
+             "Application crashed with Windows exception 0x%08lx.\n\nCrash details saved to crash.log\n\nTime: %s", 
+             exc_info->ExceptionRecord->ExceptionCode, time_str);
+    show_error_message("Application Crash Detected", alert_msg);
+    
     // Write to stderr (for console if available)
     fprintf(stderr, "\n=== WINDOWS EXCEPTION DETECTED ===\n");
     fprintf(stderr, "Time: %s\n", time_str);
     fprintf(stderr, "Exception Code: 0x%08lx\n", exc_info->ExceptionRecord->ExceptionCode);
     fprintf(stderr, "Exception Address: 0x%p\n", exc_info->ExceptionRecord->ExceptionAddress);
+    fflush(stderr);
     
     // Write to file if we could open it
     if (crash_file) {
-        fprintf(crash_file, "\n=== WINDOWS EXCEPTION DETECTED ===\n");
-        fprintf(crash_file, "Time: %s\n", time_str);
-        fprintf(crash_file, "Exception Code: 0x%08lx\n", exc_info->ExceptionRecord->ExceptionCode);
-        fprintf(crash_file, "Exception Address: 0x%p\n", exc_info->ExceptionRecord->ExceptionAddress);
+        safe_log_write(crash_file, "\n=== WINDOWS EXCEPTION DETECTED ===\n");
+        safe_log_write(crash_file, "Time: %s\n", time_str);
+        safe_log_write(crash_file, "Exception Code: 0x%08lx\n", exc_info->ExceptionRecord->ExceptionCode);
+        safe_log_write(crash_file, "Exception Address: 0x%p\n", exc_info->ExceptionRecord->ExceptionAddress);
     }
     
     // Print exception type
@@ -104,21 +143,25 @@ LONG WINAPI windows_exception_handler(EXCEPTION_POINTERS* exc_info) {
     }
     
     fprintf(stderr, "Exception Type: %s\n", exception_name);
+    fflush(stderr);
     if (crash_file) {
-        fprintf(crash_file, "Exception Type: %s\n", exception_name);
+        safe_log_write(crash_file, "Exception Type: %s\n", exception_name);
     }
     
     // Get stack trace using the exception context
     fprintf(stderr, "Stack trace (Windows Exception):\n");
+    fflush(stderr);
     if (crash_file) {
-        fprintf(crash_file, "Stack trace (Windows Exception):\n");
+        safe_log_write(crash_file, "Stack trace (Windows Exception):\n");
     }
     
     print_windows_stack_trace_from_context(exc_info->ContextRecord, crash_file);
     
     fprintf(stderr, "=== END EXCEPTION INFO ===\n");
+    fflush(stderr);
     if (crash_file) {
-        fprintf(crash_file, "=== END EXCEPTION INFO ===\n\n");
+        safe_log_write(crash_file, "=== END EXCEPTION INFO ===\n\n");
+        fflush(crash_file);  // Extra safety flush
         fclose(crash_file);
     }
     
@@ -302,16 +345,40 @@ void crash_handler(int sig) {
     // Try to open crash log file
     crash_file = fopen("crash.log", "a");
     
+    // Show immediate alert to user
+    char alert_msg[512];
+    const char* signal_name = "Unknown";
+    switch (sig) {
+        case SIGSEGV: signal_name = "Segmentation Fault"; break;
+        case SIGABRT: signal_name = "Abort"; break;
+        case SIGFPE: signal_name = "Floating Point Exception"; break;
+        case SIGILL: signal_name = "Illegal Instruction"; break;
+        default: break;
+    }
+    
+    snprintf(alert_msg, sizeof(alert_msg), 
+             "Application crashed with signal %d (%s).\n\nCrash details saved to crash.log\n\nTime: %s", 
+             sig, signal_name, time_str);
+    
+#ifdef _WIN32
+    show_error_message("Application Crash Detected", alert_msg);
+#else
+    // For Linux/macOS, print to stderr (console available)
+    fprintf(stderr, "\n=== CRASH ALERT ===\n%s\n=== END ALERT ===\n", alert_msg);
+    fflush(stderr);
+#endif
+    
     // Write to stderr (for console if available)
     fprintf(stderr, "\n=== CRASH DETECTED ===\n");
     fprintf(stderr, "Time: %s\n", time_str);
-    fprintf(stderr, "Signal: %d\n", sig);
+    fprintf(stderr, "Signal: %d (%s)\n", sig, signal_name);
+    fflush(stderr);
     
     // Write to file if we could open it
     if (crash_file) {
-        fprintf(crash_file, "\n=== CRASH DETECTED ===\n");
-        fprintf(crash_file, "Time: %s\n", time_str);
-        fprintf(crash_file, "Signal: %d\n", sig);
+        safe_log_write(crash_file, "\n=== CRASH DETECTED ===\n");
+        safe_log_write(crash_file, "Time: %s\n", time_str);
+        safe_log_write(crash_file, "Signal: %d (%s)\n", sig, signal_name);
     }
     
 #ifdef __linux__
@@ -325,14 +392,15 @@ void crash_handler(int sig) {
     strings = backtrace_symbols(array, size);
     
     fprintf(stderr, "Stack trace (%zd frames):\n", size);
+    fflush(stderr);
     if (crash_file) {
-        fprintf(crash_file, "Stack trace (%zd frames):\n", size);
+        safe_log_write(crash_file, "Stack trace (%zd frames):\n", size);
     }
     
     for (i = 0; i < size; i++) {
         fprintf(stderr, "  %s\n", strings[i]);
         if (crash_file) {
-            fprintf(crash_file, "  %s\n", strings[i]);
+            safe_log_write(crash_file, "  %s\n", strings[i]);
         }
     }
     
@@ -340,22 +408,26 @@ void crash_handler(int sig) {
 #elif defined(_WIN32)
     // Get stack trace (Windows)
     fprintf(stderr, "Stack trace (Windows):\n");
+    fflush(stderr);
     if (crash_file) {
-        fprintf(crash_file, "Stack trace (Windows):\n");
+        safe_log_write(crash_file, "Stack trace (Windows):\n");
     }
     
     print_windows_stack_trace(crash_file);
 #else
     // No stack trace available on this platform
     fprintf(stderr, "Stack trace not available on this platform\n");
+    fflush(stderr);
     if (crash_file) {
-        fprintf(crash_file, "Stack trace not available on this platform\n");
+        safe_log_write(crash_file, "Stack trace not available on this platform\n");
     }
 #endif
     
     fprintf(stderr, "=== END CRASH INFO ===\n");
+    fflush(stderr);
     if (crash_file) {
-        fprintf(crash_file, "=== END CRASH INFO ===\n\n");
+        safe_log_write(crash_file, "=== END CRASH INFO ===\n\n");
+        fflush(crash_file);  // Extra safety flush
         fclose(crash_file);
     }
     
@@ -374,6 +446,7 @@ void setup_crash_handlers() {
 #ifdef _WIN32
     // Also set up Windows structured exception handling
     SetUnhandledExceptionFilter(windows_exception_handler);
+#endif
     
     // Write a test log entry to verify crash logging is working
     FILE *test_file = fopen("crash.log", "a");
@@ -382,13 +455,23 @@ void setup_crash_handlers() {
         char time_str[64];
         time(&now);
         strftime(time_str, sizeof(time_str), "%Y-%m-%d %H:%M:%S", localtime(&now));
-        fprintf(test_file, "\n=== CRASH HANDLER INITIALIZED ===\n");
-        fprintf(test_file, "Time: %s\n", time_str);
-        fprintf(test_file, "Crash logging system is active\n");
-        fprintf(test_file, "=== END INIT INFO ===\n\n");
+        safe_log_write(test_file, "\n=== CRASH HANDLER INITIALIZED ===\n");
+        safe_log_write(test_file, "Time: %s\n", time_str);
+        safe_log_write(test_file, "Platform: ");
+#ifdef _WIN32
+        safe_log_write(test_file, "Windows\n");
+#elif defined(__APPLE__)
+        safe_log_write(test_file, "macOS\n");
+#elif defined(__linux__)
+        safe_log_write(test_file, "Linux\n");
+#else
+        safe_log_write(test_file, "Unknown\n");
+#endif
+        safe_log_write(test_file, "Crash logging system is active\n");
+        safe_log_write(test_file, "=== END INIT INFO ===\n\n");
+        fflush(test_file);
         fclose(test_file);
     }
-#endif
 }
 
 // Sprite frame structure
