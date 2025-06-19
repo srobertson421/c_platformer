@@ -51,6 +51,9 @@ typedef struct {
 } DebugShape;
 
 #ifdef _WIN32
+// Forward declaration
+void print_windows_stack_trace_from_context(CONTEXT* context, FILE *output_file);
+
 // Windows unhandled exception filter for catching crashes that don't trigger signals
 LONG WINAPI windows_exception_handler(EXCEPTION_POINTERS* exc_info) {
     FILE *crash_file = NULL;
