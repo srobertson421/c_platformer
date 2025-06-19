@@ -93,31 +93,26 @@ jobs:
           update: true
           install: >-
             mingw-w64-x86_64-gcc
-            mingw-w64-x86_64-cmake
-            mingw-w64-x86_64-make
             mingw-w64-x86_64-SDL2
             mingw-w64-x86_64-SDL2_image
-            mingw-w64-x86_64-chipmunk
             mingw-w64-x86_64-pkg-config
       
       - name: Build
         run: |
-          mkdir build
-          cd build
-          cmake -G "MinGW Makefiles" ..
-          mingw32-make
+          # Use the working build script instead of CMake
+          chmod +x build_msys2.sh
+          ./build_msys2.sh
           
       - name: Package
         run: |
           mkdir -p platformer-windows
-          cp build/platformer.exe platformer-windows/
+          cp physics_demo.exe platformer-windows/
           cp -r assets platformer-windows/
-          # Copy required DLLs
-          ldd build/platformer.exe | grep -i mingw | awk '{print $3}' | xargs -I{} cp {} platformer-windows/
+          # Copy required DLLs using ldd to find dependencies
+          ldd physics_demo.exe | grep -i mingw | awk '{print $3}' | xargs -I{} cp {} platformer-windows/ || true
           # Also copy SDL2 and other DLLs that might not show up in ldd
           cp /mingw64/bin/SDL2.dll platformer-windows/ || true
           cp /mingw64/bin/SDL2_image.dll platformer-windows/ || true
-          cp /mingw64/bin/libchipmunk.dll platformer-windows/ || true
           cp /mingw64/bin/libpng*.dll platformer-windows/ || true
           cp /mingw64/bin/zlib*.dll platformer-windows/ || true
           cp /mingw64/bin/libjpeg*.dll platformer-windows/ || true
@@ -129,7 +124,7 @@ jobs:
           cp /mingw64/bin/libwinpthread-1.dll platformer-windows/ || true
           # List all DLLs in the package for debugging
           echo "DLLs included in package:"
-          ls -la platformer-windows/*.dll
+          ls -la platformer-windows/*.dll || echo "No DLLs found"
           # Create zip archive using tar (available in MSYS2)
           tar -czf platformer-windows-x64.tar.gz platformer-windows
           
