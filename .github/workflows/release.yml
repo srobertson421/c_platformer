@@ -130,14 +130,14 @@ jobs:
           # List all DLLs in the package for debugging
           echo "DLLs included in package:"
           ls -la platformer-windows/*.dll || echo "No DLLs found"
-          # Create zip archive using tar (available in MSYS2)
-          tar -czf platformer-windows-x64.tar.gz platformer-windows
+          # Create zip archive using powershell (more Windows-native)
+          powershell -Command "Compress-Archive -Path platformer-windows -DestinationPath platformer-windows-x64.zip"
           
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: platformer-windows-x64
-          path: platformer-windows-x64.tar.gz
+          path: platformer-windows-x64.zip
 
   create-release:
     needs: [build-linux, build-macos, build-windows]
@@ -197,4 +197,4 @@ jobs:
           files: |
             artifacts/platformer-linux-x64/platformer-linux-x64.tar.gz
             artifacts/platformer-macos-x64/platformer-macos-x64.tar.gz
-            artifacts/platformer-windows-x64/platformer-windows-x64.tar.gz
+            artifacts/platformer-windows-x64/platformer-windows-x64.zip
