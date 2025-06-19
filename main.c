@@ -54,6 +54,10 @@ typedef struct {
 void show_error_message(const char* title, const char* message);
 void safe_log_write(FILE* file, const char* format, ...);
 
+#ifdef _WIN32
+void print_windows_stack_trace_from_context(CONTEXT* context, FILE *output_file);
+#endif
+
 // Thread-safe logging with immediate flush
 void safe_log_write(FILE* file, const char* format, ...) {
     if (!file) return;
