@@ -99,6 +99,10 @@ jobs:
       
       - name: Build
         run: |
+          # Clone Chipmunk2D since it's not in the repository
+          if [ ! -d "Chipmunk2D" ]; then
+            git clone https://github.com/slembcke/Chipmunk2D.git
+          fi
           # Use the working build script instead of CMake
           chmod +x build_msys2.sh
           ./build_msys2.sh
