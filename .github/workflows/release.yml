@@ -71,6 +71,16 @@ jobs:
           mkdir -p platformer-macos-arm64
           cp build/platformer platformer-macos-arm64/
           cp -r assets platformer-macos-arm64/
+          # Bundle required dylibs
+          mkdir -p platformer-macos-arm64/lib
+          # Copy SDL2 and dependencies
+          cp $(brew --prefix)/lib/libSDL2-2.0.0.dylib platformer-macos-arm64/lib/ || true
+          cp $(brew --prefix)/lib/libSDL2_image-2.0.0.dylib platformer-macos-arm64/lib/ || true
+          cp $(brew --prefix)/lib/libchipmunk.7.dylib platformer-macos-arm64/lib/ || true
+          # Update library paths in the executable
+          install_name_tool -change /opt/homebrew/lib/libSDL2-2.0.0.dylib @executable_path/lib/libSDL2-2.0.0.dylib platformer-macos-arm64/platformer || true
+          install_name_tool -change /opt/homebrew/lib/libSDL2_image-2.0.0.dylib @executable_path/lib/libSDL2_image-2.0.0.dylib platformer-macos-arm64/platformer || true
+          install_name_tool -change /opt/homebrew/lib/libchipmunk.7.dylib @executable_path/lib/libchipmunk.7.dylib platformer-macos-arm64/platformer || true
           tar -czf platformer-macos-arm64.tar.gz platformer-macos-arm64
           
       - name: Upload artifact
@@ -101,6 +111,16 @@ jobs:
           mkdir -p platformer-macos-x64
           cp build/platformer platformer-macos-x64/
           cp -r assets platformer-macos-x64/
+          # Bundle required dylibs
+          mkdir -p platformer-macos-x64/lib
+          # Copy SDL2 and dependencies
+          cp $(brew --prefix)/lib/libSDL2-2.0.0.dylib platformer-macos-x64/lib/ || true
+          cp $(brew --prefix)/lib/libSDL2_image-2.0.0.dylib platformer-macos-x64/lib/ || true
+          cp $(brew --prefix)/lib/libchipmunk.7.dylib platformer-macos-x64/lib/ || true
+          # Update library paths in the executable
+          install_name_tool -change /usr/local/opt/sdl2/lib/libSDL2-2.0.0.dylib @executable_path/lib/libSDL2-2.0.0.dylib platformer-macos-x64/platformer || true
+          install_name_tool -change /usr/local/opt/sdl2_image/lib/libSDL2_image-2.0.0.dylib @executable_path/lib/libSDL2_image-2.0.0.dylib platformer-macos-x64/platformer || true
+          install_name_tool -change /usr/local/opt/chipmunk/lib/libchipmunk.7.dylib @executable_path/lib/libchipmunk.7.dylib platformer-macos-x64/platformer || true
           tar -czf platformer-macos-x64.tar.gz platformer-macos-x64
           
       - name: Upload artifact
