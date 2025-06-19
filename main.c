@@ -440,6 +440,29 @@ void crash_handler(int sig) {
     raise(sig);
 }
 
+// Test crash function for debugging crash handlers
+void test_crash_handlers() {
+    FILE *test_file = fopen("crash.log", "a");
+    if (test_file) {
+        time_t now;
+        char time_str[64];
+        time(&now);
+        strftime(time_str, sizeof(time_str), "%Y-%m-%d %H:%M:%S", localtime(&now));
+        safe_log_write(test_file, "\n=== MANUAL CRASH TEST INITIATED ===\n");
+        safe_log_write(test_file, "Time: %s\n", time_str);
+        safe_log_write(test_file, "Testing crash handlers...\n");
+        fflush(test_file);
+        fclose(test_file);
+    }
+    
+    // Show alert before crash
+    show_error_message("Crash Test", "About to trigger a segmentation fault to test crash handlers.");
+    
+    // Trigger segmentation fault
+    int *p = NULL;
+    *p = 42; // This should crash the program
+}
+
 // Setup crash handlers
 void setup_crash_handlers() {
     signal(SIGSEGV, crash_handler);  // Segmentation fault
@@ -450,6 +473,10 @@ void setup_crash_handlers() {
 #ifdef _WIN32
     // Also set up Windows structured exception handling
     SetUnhandledExceptionFilter(windows_exception_handler);
+    
+    // Additional Windows signal handlers (some crashes may still trigger signals)
+    signal(SIGINT, crash_handler);   // Interrupt
+    signal(SIGTERM, crash_handler);  // Termination
 #endif
     
     // Write a test log entry to verify crash logging is working
@@ -803,6 +830,21 @@ int main(int argc, char* argv[]) {
     // Setup crash handlers
     setup_crash_handlers();
     
+    // Log application start
+    FILE *log_file = fopen("crash.log", "a");
+    if (log_file) {
+        time_t now;
+        char time_str[64];
+        time(&now);
+        strftime(time_str, sizeof(time_str), "%Y-%m-%d %H:%M:%S", localtime(&now));
+        safe_log_write(log_file, "\n=== APPLICATION STARTED ===\n");
+        safe_log_write(log_file, "Time: %s\n", time_str);
+        safe_log_write(log_file, "Crash handlers are active. Press F9 to test.\n");
+        safe_log_write(log_file, "=== END START LOG ===\n\n");
+        fflush(log_file);
+        fclose(log_file);
+    }
+    
     // Initialize SDL
     if (SDL_Init(SDL_INIT_VIDEO) < 0) {
         fprintf(stderr, "SDL initialization failed: %s\n", SDL_GetError());
@@ -938,6 +980,10 @@ int main(int argc, char* argv[]) {
                     case SDLK_F1:
                         showDebug = !showDebug;
                         printf("Debug visualization: %s\n", showDebug ? "ON" : "OFF");
+                        break;
+                    case SDLK_F9:
+                        // Test crash handlers (F9 key)
+                        test_crash_handlers();
                         break;
                     case SDLK_a:
                     case SDLK_LEFT:
@@ -1095,6 +1141,20 @@ int main(int argc, char* argv[]) {
     SDL_DestroyWindow(window);
     IMG_Quit();
     SDL_Quit();
+    
+    // Log normal application exit
+    log_file = fopen("crash.log", "a");
+    if (log_file) {
+        time_t now;
+        char time_str[64];
+        time(&now);
+        strftime(time_str, sizeof(time_str), "%Y-%m-%d %H:%M:%S", localtime(&now));
+        safe_log_write(log_file, "\n=== APPLICATION EXITED NORMALLY ===\n");
+        safe_log_write(log_file, "Time: %s\n", time_str);
+        safe_log_write(log_file, "=== END EXIT LOG ===\n\n");
+        fflush(log_file);
+        fclose(log_file);
+    }
 
     return 0;
 }
