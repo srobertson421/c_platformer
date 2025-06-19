@@ -49,7 +49,7 @@ jobs:
           name: platformer-linux-x64
           path: platformer-linux-x64.tar.gz
 
-  build-macos:
+  build-macos-arm64:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
@@ -63,15 +63,45 @@ jobs:
           rm -rf build
           mkdir build
           cd build
-          cmake ..
+          cmake .. -DCMAKE_OSX_ARCHITECTURES=arm64
           make
           
       - name: Package
         run: |
-          mkdir -p platformer-macos
-          cp build/platformer platformer-macos/
-          cp -r assets platformer-macos/
-          tar -czf platformer-macos-x64.tar.gz platformer-macos
+          mkdir -p platformer-macos-arm64
+          cp build/platformer platformer-macos-arm64/
+          cp -r assets platformer-macos-arm64/
+          tar -czf platformer-macos-arm64.tar.gz platformer-macos-arm64
+          
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: platformer-macos-arm64
+          path: platformer-macos-arm64.tar.gz
+
+  build-macos-x64:
+    runs-on: macos-13
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Install dependencies
+        run: |
+          brew install cmake sdl2 sdl2_image chipmunk pkg-config
+      
+      - name: Build
+        run: |
+          rm -rf build
+          mkdir build
+          cd build
+          cmake .. -DCMAKE_OSX_ARCHITECTURES=x86_64
+          make
+          
+      - name: Package
+        run: |
+          mkdir -p platformer-macos-x64
+          cp build/platformer platformer-macos-x64/
+          cp -r assets platformer-macos-x64/
+          tar -czf platformer-macos-x64.tar.gz platformer-macos-x64
           
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -140,7 +170,7 @@ jobs:
           path: platformer-windows-x64.zip
 
   create-release:
-    needs: [build-linux, build-macos, build-windows]
+    needs: [build-linux, build-macos-arm64, build-macos-x64, build-windows]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -196,5 +226,6 @@ jobs:
             
           files: |
             artifacts/platformer-linux-x64/platformer-linux-x64.tar.gz
+            artifacts/platformer-macos-arm64/platformer-macos-arm64.tar.gz
             artifacts/platformer-macos-x64/platformer-macos-x64.tar.gz
             artifacts/platformer-windows-x64/platformer-windows-x64.zip
