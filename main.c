@@ -51,6 +51,156 @@ typedef struct {
 } DebugShape;
 
 #ifdef _WIN32
+// Windows unhandled exception filter for catching crashes that don't trigger signals
+LONG WINAPI windows_exception_handler(EXCEPTION_POINTERS* exc_info) {
+    FILE *crash_file = NULL;
+    time_t now;
+    char time_str[64];
+    
+    // Get current time for timestamp
+    time(&now);
+    strftime(time_str, sizeof(time_str), "%Y-%m-%d %H:%M:%S", localtime(&now));
+    
+    // Try to open crash log file
+    crash_file = fopen("crash.log", "a");
+    
+    // Write to stderr (for console if available)
+    fprintf(stderr, "\n=== WINDOWS EXCEPTION DETECTED ===\n");
+    fprintf(stderr, "Time: %s\n", time_str);
+    fprintf(stderr, "Exception Code: 0x%08lx\n", exc_info->ExceptionRecord->ExceptionCode);
+    fprintf(stderr, "Exception Address: 0x%p\n", exc_info->ExceptionRecord->ExceptionAddress);
+    
+    // Write to file if we could open it
+    if (crash_file) {
+        fprintf(crash_file, "\n=== WINDOWS EXCEPTION DETECTED ===\n");
+        fprintf(crash_file, "Time: %s\n", time_str);
+        fprintf(crash_file, "Exception Code: 0x%08lx\n", exc_info->ExceptionRecord->ExceptionCode);
+        fprintf(crash_file, "Exception Address: 0x%p\n", exc_info->ExceptionRecord->ExceptionAddress);
+    }
+    
+    // Print exception type
+    const char* exception_name = "Unknown";
+    switch (exc_info->ExceptionRecord->ExceptionCode) {
+        case EXCEPTION_ACCESS_VIOLATION:
+            exception_name = "Access Violation";
+            break;
+        case EXCEPTION_STACK_OVERFLOW:
+            exception_name = "Stack Overflow";
+            break;
+        case EXCEPTION_INT_DIVIDE_BY_ZERO:
+            exception_name = "Divide by Zero";
+            break;
+        case EXCEPTION_ILLEGAL_INSTRUCTION:
+            exception_name = "Illegal Instruction";
+            break;
+        case EXCEPTION_FLT_DIVIDE_BY_ZERO:
+            exception_name = "Float Divide by Zero";
+            break;
+        default:
+            break;
+    }
+    
+    fprintf(stderr, "Exception Type: %s\n", exception_name);
+    if (crash_file) {
+        fprintf(crash_file, "Exception Type: %s\n", exception_name);
+    }
+    
+    // Get stack trace using the exception context
+    fprintf(stderr, "Stack trace (Windows Exception):\n");
+    if (crash_file) {
+        fprintf(crash_file, "Stack trace (Windows Exception):\n");
+    }
+    
+    print_windows_stack_trace_from_context(exc_info->ContextRecord, crash_file);
+    
+    fprintf(stderr, "=== END EXCEPTION INFO ===\n");
+    if (crash_file) {
+        fprintf(crash_file, "=== END EXCEPTION INFO ===\n\n");
+        fclose(crash_file);
+    }
+    
+    // Return to let Windows handle the exception (will terminate the process)
+    return EXCEPTION_EXECUTE_HANDLER;
+}
+
+// Windows-specific stack trace function using provided context
+void print_windows_stack_trace_from_context(CONTEXT* context, FILE *output_file) {
+    HANDLE process = GetCurrentProcess();
+    HANDLE thread = GetCurrentThread();
+    
+    // Initialize symbol handler
+    SymInitialize(process, NULL, TRUE);
+    SymSetOptions(SYMOPT_LOAD_LINES | SYMOPT_FAIL_CRITICAL_ERRORS);
+    
+    // Setup stack frame for walking
+    STACKFRAME64 frame;
+    memset(&frame, 0, sizeof(STACKFRAME64));
+    
+    #ifdef _M_X64
+    DWORD machineType = IMAGE_FILE_MACHINE_AMD64;
+    frame.AddrPC.Offset = context->Rip;
+    frame.AddrPC.Mode = AddrModeFlat;
+    frame.AddrFrame.Offset = context->Rsp;
+    frame.AddrFrame.Mode = AddrModeFlat;
+    frame.AddrStack.Offset = context->Rsp;
+    frame.AddrStack.Mode = AddrModeFlat;
+    #else
+    DWORD machineType = IMAGE_FILE_MACHINE_I386;
+    frame.AddrPC.Offset = context->Eip;
+    frame.AddrPC.Mode = AddrModeFlat;
+    frame.AddrFrame.Offset = context->Ebp;
+    frame.AddrFrame.Mode = AddrModeFlat;
+    frame.AddrStack.Offset = context->Esp;
+    frame.AddrStack.Mode = AddrModeFlat;
+    #endif
+    
+    // Walk the stack
+    int frame_count = 0;
+    while (frame_count < 10 && 
+           StackWalk64(machineType, process, thread, &frame, context, 
+                      NULL, SymFunctionTableAccess64, SymGetModuleBase64, NULL)) {
+        
+        if (frame.AddrPC.Offset == 0) break;
+        
+        // Get symbol information
+        char buffer[sizeof(SYMBOL_INFO) + MAX_SYM_NAME * sizeof(TCHAR)];
+        SYMBOL_INFO* symbol = (SYMBOL_INFO*)buffer;
+        symbol->SizeOfStruct = sizeof(SYMBOL_INFO);
+        symbol->MaxNameLen = MAX_SYM_NAME;
+        
+        DWORD64 displacement = 0;
+        char symbol_name[256] = "Unknown";
+        
+        if (SymFromAddr(process, frame.AddrPC.Offset, &displacement, symbol)) {
+            strncpy(symbol_name, symbol->Name, sizeof(symbol_name) - 1);
+            symbol_name[sizeof(symbol_name) - 1] = '\0';
+        }
+        
+        // Get line information
+        IMAGEHLP_LINE64 line;
+        line.SizeOfStruct = sizeof(IMAGEHLP_LINE64);
+        DWORD line_displacement = 0;
+        char file_info[512] = "";
+        
+        if (SymGetLineFromAddr64(process, frame.AddrPC.Offset, &line_displacement, &line)) {
+            snprintf(file_info, sizeof(file_info), " [%s:%lu]", line.FileName, line.LineNumber);
+        }
+        
+        // Print frame information
+        fprintf(stderr, "  #%d: 0x%llx %s%s\n", frame_count, 
+                (unsigned long long)frame.AddrPC.Offset, symbol_name, file_info);
+        
+        if (output_file) {
+            fprintf(output_file, "  #%d: 0x%llx %s%s\n", frame_count, 
+                    (unsigned long long)frame.AddrPC.Offset, symbol_name, file_info);
+        }
+        
+        frame_count++;
+    }
+    
+    SymCleanup(process);
+}
+
 // Windows-specific stack trace function
 void print_windows_stack_trace(FILE *output_file) {
     HANDLE process = GetCurrentProcess();
@@ -217,6 +367,25 @@ void setup_crash_handlers() {
     signal(SIGABRT, crash_handler);  // Abort
     signal(SIGFPE, crash_handler);   // Floating point exception
     signal(SIGILL, crash_handler);   // Illegal instruction
+    
+#ifdef _WIN32
+    // Also set up Windows structured exception handling
+    SetUnhandledExceptionFilter(windows_exception_handler);
+    
+    // Write a test log entry to verify crash logging is working
+    FILE *test_file = fopen("crash.log", "a");
+    if (test_file) {
+        time_t now;
+        char time_str[64];
+        time(&now);
+        strftime(time_str, sizeof(time_str), "%Y-%m-%d %H:%M:%S", localtime(&now));
+        fprintf(test_file, "\n=== CRASH HANDLER INITIALIZED ===\n");
+        fprintf(test_file, "Time: %s\n", time_str);
+        fprintf(test_file, "Crash logging system is active\n");
+        fprintf(test_file, "=== END INIT INFO ===\n\n");
+        fclose(test_file);
+    }
+#endif
 }
 
 // Sprite frame structure
